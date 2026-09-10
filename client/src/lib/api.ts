@@ -16,9 +16,11 @@ export type Player = {
   active: boolean;
   notes: string | null;
   experienceYears: number | null;
+  /** True once this player has ever been assigned to a TeamSlot this season — see the delete-guard note on DELETE /api/players/:id. Server-computed, read-only. */
+  hasTeamHistory: boolean;
 };
 
-export type PlayerInput = Omit<Player, "id">;
+export type PlayerInput = Omit<Player, "id" | "hasTeamHistory">;
 
 export type LastCyclePositions = {
   cycleNumber: number | null;
@@ -176,6 +178,7 @@ export const api = {
   getCycle: (id: string) => request<CycleWithDetails>(`/api/cycles/${id}`),
   createCycle: (input: { seasonId: string; leagueId: string; teamCount: TeamCount }) =>
     request<Cycle>("/api/cycles", { method: "POST", body: JSON.stringify(input) }),
+  deleteCycle: (id: string) => request<void>(`/api/cycles/${id}`, { method: "DELETE" }),
 
   getTeams: (cycleId: string) => request<Team[]>(`/api/cycles/${cycleId}/teams`),
   generateTeams: (cycleId: string) =>

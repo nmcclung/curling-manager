@@ -79,4 +79,41 @@ describe("team generation", () => {
     const res = await request(app).patch(`/api/team-slots/${skipSlot.id}`).send({ playerId: null });
     expect(res.status).toBe(400);
   });
+
+  it("a player with a team assignment can be deactivated but not deleted; one with none can be deleted freely", async () => {
+    await seedRoster(seasonId, leagueId);
+    const cycleRes = await request(app).post("/api/cycles").send({ seasonId, leagueId, teamCount: 12 });
+    await request(app).post(`/api/cycles/${cycleRes.body.id}/teams/generate`).send({});
+
+    const teamsRes = await request(app).get(`/api/cycles/${cycleRes.body.id}/teams`);
+    const assignedPlayerId = teamsRes.body[0].slots[0].playerId;
+
+    // Added after generation — guaranteed never assigned to any team.
+    const freshPlayer = await createTestPlayer(seasonId, leagueId, { name: "Fresh Addition", canPlaySkip: true });
+
+    // GET / reports hasTeamHistory correctly for both.
+    const listRes = await request(app).get(`/api/players?seasonId=${seasonId}&leagueId=${leagueId}`);
+    const assignedPlayer = listRes.body.find((p: { id: string }) => p.id === assignedPlayerId);
+    const unassignedPlayer = listRes.body.find((p: { id: string }) => p.id === freshPlayer.id);
+    expect(assignedPlayer.hasTeamHistory).toBe(true);
+    expect(unassignedPlayer.hasTeamHistory).toBe(false);
+
+    // Deleting the assigned player is rejected...
+    const deleteRes = await request(app).delete(`/api/players/${assignedPlayerId}`);
+    expect(deleteRes.status).toBe(400);
+    expect(deleteRes.body.error).toContain("deactivate");
+
+    // ...but deactivating them works fine, and preserves the team slot.
+    const deactivateRes = await request(app).patch(`/api/players/${assignedPlayerId}`).send({ active: false });
+    expect(deactivateRes.status).toBe(200);
+    const teamsAfter = await request(app).get(`/api/cycles/${cycleRes.body.id}/teams`);
+    const stillAssigned = teamsAfter.body.some((t: { slots: { playerId: string | null }[] }) =>
+      t.slots.some((s) => s.playerId === assignedPlayerId),
+    );
+    expect(stillAssigned).toBe(true);
+
+    // A player never assigned to any team can still be deleted freely.
+    const deleteUnassignedRes = await request(app).delete(`/api/players/${freshPlayer.id}`);
+    expect(deleteUnassignedRes.status).toBe(204);
+  });
 });

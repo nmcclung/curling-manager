@@ -90,7 +90,18 @@ The app has three routed pages (`react-router-dom`, shell + nav in
   them stale; existing stale pairs (an inactive member some other way) show
   a warning inline. Pair creation validates both players are active,
   client-side (the picker only lists active players) and server-side.
-  Built and working.
+  Once a player has ever been assigned to a `TeamSlot`, deleting them is
+  blocked server-side (`DELETE /api/players/:id`, guarded by a
+  `hasTeamHistory` flag computed on `GET /api/players`) — only
+  deactivation is allowed from that point on. Deletion used to cascade
+  silently (schema `onDelete: SetNull` on the slot): a deleted player's
+  slot would just go empty, possibly leaving Skip unfilled — a state
+  every other code path treats as impossible — the schedule wouldn't get
+  flagged stale (that cascade happens at the DB level, bypassing the
+  application logic that normally sets `isStale` on a slot change), and
+  the decay-weighted teammate-history calculation would quietly lose their
+  past co-occurrences, corrupting *other* players' history too. A player
+  never assigned to any team still deletes freely. Built and working.
 
   **Roster import** (`client/src/features/roster/ImportRosterDialog.tsx`,
   `client/src/lib/csv.ts`, `POST /api/players/import`) — brings in an
@@ -128,8 +139,13 @@ The app has three routed pages (`react-router-dom`, shell + nav in
   cycle UI). Seasons can also be deleted (cascades to all its cycles/
   teams/matches/schedules *and* its entire roster via schema `onDelete:
   Cascade`) — safe in isolation since a season is a hard history boundary,
-  so no other season can reference into it. No delete for individual
-  cycles yet, only whole seasons. Built and working.
+  so no other season can reference into it. Individual cycles can also be
+  deleted ("Delete Cycle" in `CyclePicker`, `DELETE /api/cycles/:id`,
+  cascades to that cycle's own teams/matches/schedule) — safer than
+  deleting a whole season since it can't corrupt *other* cycles' already-
+  generated team assignments, only a future regeneration of a later cycle
+  in the same season+league would no longer see the deleted one in its
+  teammate-history calculation. Built and working.
 - **Teams** (`client/src/features/teams/`, `server/src/teamGeneration/`,
   `server/src/routes/teams.ts`) — full team generation is built and working:
   roster-readiness checklist, "Generate Teams" (§5 algorithm: pair
@@ -308,13 +324,18 @@ doc's prose, which undersold how intricate the real structure is.
 real anonymized former league roster (120 players, 19 pairs across both
 leagues — names swapped for synthetic ones, all other fields real) used by
 `npm run prisma:seed`. The original real-name CSVs (if present at repo
-root) are gitignored — never commit them. Monday's real data only supports
-a 12-team cycle (12 skip-eligible players, so 14 teams would fail the
-skip-minimum invariant); Tuesday supports 12 or 14 (14 skips exactly meets
-a 14-team minimum). Good for exercising invariant edge cases in team
-generation — e.g. Tuesday's 14-team config actually has pairs spanning the
-singleton groups, and generation correctly falls back to drafting those
-players individually.
+root) are gitignored — never commit them. Which team counts each league's
+active roster actually supports depends on its current size/position mix
+and drifts as the CSV changes — check the Teams page's roster-readiness
+checklist for the current answer rather than trusting a hardcoded number
+here (this note has gone stale before: earlier it said Monday only
+supported 12-team and Tuesday supported 12-or-14; as of 2026-09-10 both
+leagues sit at 64 active players, which only clears the 12-/14-team size
+bounds — a 16-team cycle — and even then Monday's skip-only specialists
+land one over the 16-team oversupply gate). Good for exercising invariant
+edge cases in team generation regardless of the exact numbers — e.g.
+Tuesday's pairs span the 14-team config's singleton groups, and generation
+correctly falls back to drafting those players individually.
 
 **shadcn/ui note**: this project's CLI version (shadcn 4.x, "radix-ui"/"cn"
 based) needs `baseUrl` + `paths` in *both* `client/tsconfig.json` and

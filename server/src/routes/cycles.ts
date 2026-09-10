@@ -58,3 +58,17 @@ cyclesRouter.post("/", async (req, res) => {
 
   res.status(201).json(cycle);
 });
+
+// Cascades to this cycle's teams (and their slots), matches, and schedule
+// (schema onDelete: Cascade) — unlike deleting a player, this can't corrupt
+// *other* cycles' already-generated team assignments, only a future
+// regeneration of a later cycle in the same season+league would no longer
+// see this one in its teammate-history calculation.
+cyclesRouter.delete("/:id", async (req, res) => {
+  try {
+    await prisma.cycle.delete({ where: { id: req.params.id } });
+    res.status(204).end();
+  } catch {
+    res.status(404).json({ error: "Cycle not found" });
+  }
+});

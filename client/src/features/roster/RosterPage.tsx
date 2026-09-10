@@ -249,6 +249,19 @@ function LeagueRoster({
 
   const remove = async (player: Player) => {
     setError(null);
+    // Once a player has ever been assigned to a team, deleting them isn't
+    // safe (their slot would silently go empty — possibly Skip, an
+    // otherwise-impossible state — the schedule wouldn't get flagged
+    // stale, and season teammate-history for *other* players who played
+    // with them would quietly lose those co-occurrences). Deactivating
+    // preserves all of that, so block outright rather than warn-and-allow.
+    if (player.hasTeamHistory) {
+      window.alert(
+        `${player.name} has been assigned to a team this season and can no longer be deleted — use the Active checkbox to deactivate them instead, which removes them from future team generation while keeping their history intact.`,
+      );
+      return;
+    }
+
     let warning = "";
     try {
       const pairs = await api.getPairs(seasonId, league.id);
@@ -281,7 +294,11 @@ function LeagueRoster({
       const updated = await api.batchUpdatePlayers(updates);
       const t1 = performance.now();
       const byId = new Map(updated.map((p) => [p.id, p]));
-      setPlayers((prev) => prev?.map((p) => byId.get(p.id) ?? p) ?? prev);
+      // Merge, not replace — the batch PATCH response doesn't recompute
+      // hasTeamHistory (editing a field can't change it), so spreading
+      // over the previous player preserves that field rather than
+      // clobbering it with whatever the response happens to have.
+      setPlayers((prev) => prev?.map((p) => (byId.has(p.id) ? { ...p, ...byId.get(p.id) } : p)) ?? prev);
       setPendingChanges({});
       requestAnimationFrame(() =>
         requestAnimationFrame(() => {
@@ -422,7 +439,13 @@ function LeagueRoster({
                   <Button
                     variant="outline"
                     size="sm"
-                    className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                    disabled={player.hasTeamHistory}
+                    title={
+                      player.hasTeamHistory
+                        ? "Assigned to a team this season — deactivate instead of deleting"
+                        : undefined
+                    }
+                    className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive disabled:pointer-events-auto"
                     onClick={() => remove(player)}
                   >
                     Delete

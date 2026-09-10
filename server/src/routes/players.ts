@@ -49,7 +49,19 @@ playersRouter.get("/", async (req, res) => {
     where: { ...(leagueId ? { leagueId } : {}), ...(seasonId ? { seasonId } : {}) },
     orderBy: { name: "asc" },
   });
-  res.json(players);
+
+  // hasTeamHistory drives the delete-vs-deactivate guard below (and lets
+  // the client disable Delete proactively rather than only discovering the
+  // block after attempting it) — computed here in one grouped query rather
+  // than N+1 counts.
+  const counts = await prisma.teamSlot.groupBy({
+    by: ["playerId"],
+    where: { playerId: { in: players.map((p) => p.id) } },
+    _count: true,
+  });
+  const countByPlayerId = new Map(counts.map((c) => [c.playerId, c._count]));
+
+  res.json(players.map((p) => ({ ...p, hasTeamHistory: (countByPlayerId.get(p.id) ?? 0) > 0 })));
 });
 
 // GET /api/players/last-cycle-positions?seasonId=X&leagueId=Y — for each
@@ -92,7 +104,7 @@ playersRouter.post("/", async (req, res) => {
     assertActivePlayerHasEligibility(data);
 
     const player = await prisma.player.create({ data });
-    res.status(201).json(player);
+    res.status(201).json({ ...player, hasTeamHistory: false }); // just created — can't have any yet
   } catch (err) {
     handleError(err, res);
   }
@@ -141,7 +153,7 @@ playersRouter.post("/import", async (req, res) => {
         }),
       ),
     );
-    res.status(201).json(created);
+    res.status(201).json(created.map((p) => ({ ...p, hasTeamHistory: false }))); // just created — can't have any yet
   } catch (err) {
     handleError(err, res);
   }
@@ -199,8 +211,25 @@ playersRouter.patch("/:id", async (req, res) => {
   }
 });
 
+// Once a player has ever been assigned to a TeamSlot, deleting them stops
+// being safe: their slot would silently go empty (and could leave a Skip
+// slot with no player, a state the rest of the app treats as impossible),
+// the schedule for that cycle wouldn't get flagged stale (the FK's
+// onDelete: SetNull happens at the DB level, bypassing the application
+// logic that normally sets isStale on a slot change), and the decay-
+// weighted teammate-history calculation would quietly lose their past
+// co-occurrences — corrupting *other* players' history, not just theirs.
+// Deactivating preserves all of that. Below this threshold (never
+// assigned to a team) deletion is still fully safe and unrestricted.
 playersRouter.delete("/:id", async (req, res) => {
   try {
+    const assignmentCount = await prisma.teamSlot.count({ where: { playerId: req.params.id } });
+    if (assignmentCount > 0) {
+      throw new HttpError(
+        400,
+        `This player has been assigned to ${assignmentCount} team slot${assignmentCount === 1 ? "" : "s"} this season and can no longer be deleted — deactivate them instead to remove them from future team generation while preserving their history.`,
+      );
+    }
     await prisma.player.delete({ where: { id: req.params.id } });
     res.status(204).end();
   } catch (err) {

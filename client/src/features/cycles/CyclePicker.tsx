@@ -28,6 +28,8 @@ export function CyclePicker({
   const [cycleId, setCycleId] = useState<string>("");
 
   const [cycleDialogOpen, setCycleDialogOpen] = useState(false);
+  const [deletingCycle, setDeletingCycle] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     api.getLeagues().then((data) => {
@@ -49,6 +51,26 @@ export function CyclePicker({
   const league = leagues?.find((l) => l.id === leagueId) ?? null;
   const cycle = cycles?.find((c) => c.id === cycleId) ?? null;
 
+  const deleteCycle = async () => {
+    if (!cycle) return;
+    const proceed = window.confirm(
+      `Delete Cycle ${cycle.cycleNumber} (${cycle.teamCount} teams)? This also deletes any teams, matches, and schedule generated for it. This cannot be undone.`,
+    );
+    if (!proceed) return;
+
+    setError(null);
+    setDeletingCycle(true);
+    try {
+      await api.deleteCycle(cycle.id);
+      setCycles((prev) => (prev ?? []).filter((c) => c.id !== cycle.id));
+      setCycleId("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setDeletingCycle(false);
+    }
+  };
+
   // Deliberately keyed on id, not on `league`/`cycle`/`onChange` object identity —
   // those are new references every render and would cause a notify loop.
   useEffect(() => {
@@ -60,6 +82,7 @@ export function CyclePicker({
 
   return (
     <div className="space-y-4">
+      {error && <p className="text-sm text-destructive">{error}</p>}
       <div className="flex flex-wrap items-center gap-3">
         <SeasonPicker seasonId={seasonId} onSeasonIdChange={setSeasonId} />
 
@@ -97,6 +120,17 @@ export function CyclePicker({
           <Button variant="outline" size="sm" onClick={() => setCycleDialogOpen(true)}>
             New Cycle
           </Button>
+          {cycle && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+              disabled={deletingCycle}
+              onClick={deleteCycle}
+            >
+              Delete Cycle
+            </Button>
+          )}
         </div>
       )}
 
