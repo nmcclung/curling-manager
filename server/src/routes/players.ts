@@ -8,6 +8,7 @@ export const playersRouter = Router();
 const playerInput = z.object({
   name: z.string().trim().min(1, "Name is required"),
   leagueId: z.string().min(1, "League is required"),
+  seasonId: z.string().min(1, "Season is required"),
   canPlaySkip: z.boolean().default(false),
   canPlayVice: z.boolean().default(false),
   canPlaySecond: z.boolean().default(false),
@@ -15,6 +16,7 @@ const playerInput = z.object({
   isNewCurler: z.boolean().default(false),
   active: z.boolean().default(true),
   notes: z.string().trim().max(2000).optional().nullable(),
+  experienceYears: z.number().int().min(0).optional().nullable(),
 });
 
 const playerUpdateInput = playerInput.partial();
@@ -42,11 +44,46 @@ class HttpError extends Error {
 
 playersRouter.get("/", async (req, res) => {
   const leagueId = typeof req.query.leagueId === "string" ? req.query.leagueId : undefined;
+  const seasonId = typeof req.query.seasonId === "string" ? req.query.seasonId : undefined;
   const players = await prisma.player.findMany({
-    where: leagueId ? { leagueId } : undefined,
+    where: { ...(leagueId ? { leagueId } : {}), ...(seasonId ? { seasonId } : {}) },
     orderBy: { name: "asc" },
   });
   res.json(players);
+});
+
+// GET /api/players/last-cycle-positions?seasonId=X&leagueId=Y — for each
+// player, which position they played in the most recent cycle (this
+// season+league) that actually has generated teams. Lets the roster page
+// show "what did they play last time" next to eligibility, so someone can
+// spot a versatile player who's been stuck in one slot and diversify their
+// checkboxes on purpose. Registered before "/:id"-shaped routes for the
+// same reason as "/batch"/"/import" above, though there's currently no
+// GET "/:id" route to collide with.
+playersRouter.get("/last-cycle-positions", async (req, res) => {
+  const seasonId = typeof req.query.seasonId === "string" ? req.query.seasonId : undefined;
+  const leagueId = typeof req.query.leagueId === "string" ? req.query.leagueId : undefined;
+  if (!seasonId || !leagueId) {
+    res.status(400).json({ error: "seasonId and leagueId are required" });
+    return;
+  }
+
+  const cycles = await prisma.cycle.findMany({
+    where: { seasonId, leagueId },
+    orderBy: { cycleNumber: "desc" },
+    include: { teams: { include: { slots: true } } },
+  });
+  const lastCycleWithTeams = cycles.find((c) => c.teams.length > 0);
+
+  const positions: Record<string, string> = {};
+  if (lastCycleWithTeams) {
+    for (const team of lastCycleWithTeams.teams) {
+      for (const slot of team.slots) {
+        if (slot.playerId) positions[slot.playerId] = slot.position;
+      }
+    }
+  }
+  res.json({ cycleNumber: lastCycleWithTeams?.cycleNumber ?? null, positions });
 });
 
 playersRouter.post("/", async (req, res) => {
@@ -56,6 +93,55 @@ playersRouter.post("/", async (req, res) => {
 
     const player = await prisma.player.create({ data });
     res.status(201).json(player);
+  } catch (err) {
+    handleError(err, res);
+  }
+});
+
+const importInput = z.object({
+  leagueId: z.string().min(1, "League is required"),
+  seasonId: z.string().min(1, "Season is required"),
+  players: z
+    .array(
+      z.object({
+        name: z.string().trim().min(1, "Name is required"),
+        notes: z.string().trim().max(2000).optional().nullable(),
+        experienceYears: z.number().int().min(0).optional().nullable(),
+      }),
+    )
+    .min(1),
+});
+
+// Bulk-create from a roster CSV import (client-side review screen). Every
+// row lands inactive with no position eligibility set, regardless of what
+// the client sends — the registration export this feeds from has no
+// reliable signal for either (see CLAUDE.md's Roster import note), so a
+// human reviews and sets them deliberately per player afterward rather
+// than the importer guessing.
+playersRouter.post("/import", async (req, res) => {
+  try {
+    const { leagueId, seasonId, players: rows } = importInput.parse(req.body);
+
+    const created = await prisma.$transaction(
+      rows.map((row) =>
+        prisma.player.create({
+          data: {
+            name: row.name,
+            leagueId,
+            seasonId,
+            notes: row.notes ?? null,
+            experienceYears: row.experienceYears ?? null,
+            canPlaySkip: false,
+            canPlayVice: false,
+            canPlaySecond: false,
+            canPlayLead: false,
+            isNewCurler: false,
+            active: false,
+          },
+        }),
+      ),
+    );
+    res.status(201).json(created);
   } catch (err) {
     handleError(err, res);
   }
@@ -133,7 +219,7 @@ function handleError(err: unknown, res: import("express").Response) {
   }
   if (err instanceof Prisma.PrismaClientKnownRequestError) {
     if (err.code === "P2002") {
-      res.status(409).json({ error: "A player with this name already exists in this league." });
+      res.status(409).json({ error: "A player with this name already exists in this league for this season." });
       return;
     }
     if (err.code === "P2025") {

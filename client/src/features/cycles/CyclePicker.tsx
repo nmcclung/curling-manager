@@ -8,10 +8,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { api, type Cycle, type League, type Season, type TeamCount } from "@/lib/api";
+import { api, type Cycle, type League, type TeamCount } from "@/lib/api";
+import { SeasonPicker } from "@/features/seasons/SeasonPicker";
 import { cn } from "cn";
 
 const TEAM_COUNTS: TeamCount[] = [12, 14, 16];
@@ -22,26 +21,18 @@ export function CyclePicker({
   onChange: (selection: { league: League; cycle: Cycle | null } | null) => void;
 }) {
   const [leagues, setLeagues] = useState<League[] | null>(null);
-  const [seasons, setSeasons] = useState<Season[] | null>(null);
   const [cycles, setCycles] = useState<Cycle[] | null>(null);
 
   const [leagueId, setLeagueId] = useState<string>("");
   const [seasonId, setSeasonId] = useState<string>("");
   const [cycleId, setCycleId] = useState<string>("");
 
-  const [seasonDialogOpen, setSeasonDialogOpen] = useState(false);
   const [cycleDialogOpen, setCycleDialogOpen] = useState(false);
-  const [deletingSeason, setDeletingSeason] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     api.getLeagues().then((data) => {
       setLeagues(data);
       setLeagueId((current) => current || data[0]?.id || "");
-    });
-    api.getSeasons().then((data) => {
-      setSeasons(data);
-      setSeasonId((current) => current || data[0]?.id || "");
     });
   }, []);
 
@@ -55,39 +46,6 @@ export function CyclePicker({
 
   useEffect(loadCycles, [seasonId, leagueId]);
 
-  const deleteSeason = async () => {
-    if (!seasons) return;
-    const season = seasons.find((s) => s.id === seasonId);
-    if (!season || !leagues) return;
-
-    setError(null);
-    setDeletingSeason(true);
-    try {
-      // Count cycles across *both* leagues (this picker only has the
-      // currently-selected league's cycles loaded) so the confirm reflects
-      // everything that's actually about to be deleted.
-      const counts = await Promise.all(leagues.map((l) => api.getCycles(seasonId, l.id)));
-      const totalCycles = counts.reduce((sum, c) => sum + c.length, 0);
-
-      const proceed = window.confirm(
-        totalCycles > 0
-          ? `Delete season "${season.name}"? This permanently deletes all ${totalCycles} cycle(s) across both leagues — their teams, matches, and schedules included. This cannot be undone.`
-          : `Delete season "${season.name}"? It has no cycles yet. This cannot be undone.`,
-      );
-      if (!proceed) return;
-
-      await api.deleteSeason(seasonId);
-      setSeasons((prev) => (prev ?? []).filter((s) => s.id !== seasonId));
-      setSeasonId("");
-      setCycles(null);
-      setCycleId("");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setDeletingSeason(false);
-    }
-  };
-
   const league = leagues?.find((l) => l.id === leagueId) ?? null;
   const cycle = cycles?.find((c) => c.id === cycleId) ?? null;
 
@@ -98,38 +56,12 @@ export function CyclePicker({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [league?.id, cycle?.id]);
 
-  if (!leagues || !seasons) return <p className="text-sm text-muted-foreground">Loading...</p>;
+  if (!leagues) return <p className="text-sm text-muted-foreground">Loading...</p>;
 
   return (
     <div className="space-y-4">
-      {error && <p className="text-sm text-destructive">{error}</p>}
       <div className="flex flex-wrap items-center gap-3">
-        <Select value={seasonId} onValueChange={setSeasonId}>
-          <SelectTrigger className="w-56">
-            <SelectValue placeholder="Select a season" />
-          </SelectTrigger>
-          <SelectContent>
-            {seasons.map((s) => (
-              <SelectItem key={s.id} value={s.id}>
-                {s.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Button variant="outline" size="sm" onClick={() => setSeasonDialogOpen(true)}>
-          New Season
-        </Button>
-        {seasonId && (
-          <Button
-            variant="outline"
-            size="sm"
-            className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
-            disabled={deletingSeason}
-            onClick={deleteSeason}
-          >
-            Delete Season
-          </Button>
-        )}
+        <SeasonPicker seasonId={seasonId} onSeasonIdChange={setSeasonId} />
 
         <Tabs value={leagueId} onValueChange={setLeagueId}>
           <TabsList>
@@ -168,14 +100,6 @@ export function CyclePicker({
         </div>
       )}
 
-      <NewSeasonDialog
-        open={seasonDialogOpen}
-        onOpenChange={setSeasonDialogOpen}
-        onCreated={(season) => {
-          setSeasons((prev) => [season, ...(prev ?? [])]);
-          setSeasonId(season.id);
-        }}
-      />
       {league && (
         <NewCycleDialog
           open={cycleDialogOpen}
@@ -190,61 +114,6 @@ export function CyclePicker({
         />
       )}
     </div>
-  );
-}
-
-function NewSeasonDialog({
-  open,
-  onOpenChange,
-  onCreated,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onCreated: (season: Season) => void;
-}) {
-  const [name, setName] = useState("");
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (open) {
-      setName("");
-      setError(null);
-    }
-  }, [open]);
-
-  const create = async () => {
-    if (!name.trim()) return;
-    try {
-      const season = await api.createSeason(name.trim());
-      onCreated(season);
-      onOpenChange(false);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>New Season</DialogTitle>
-        </DialogHeader>
-        <p className="text-sm text-muted-foreground">
-          A season is a complete fresh start shared across both leagues — no history carries over, and
-          cycle numbers restart at 1.
-        </p>
-        <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. 2026 Fall" autoFocus />
-        {error && <p className="text-sm text-destructive">{error}</p>}
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button onClick={create} disabled={!name.trim()}>
-            Create
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   );
 }
 

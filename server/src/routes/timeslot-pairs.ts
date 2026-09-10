@@ -7,6 +7,7 @@ export const timeSlotPairsRouter = Router();
 
 const pairInput = z.object({
   leagueId: z.string().min(1, "League is required"),
+  seasonId: z.string().min(1, "Season is required"),
   playerAId: z.string().min(1, "Player A is required"),
   playerBId: z.string().min(1, "Player B is required"),
   priority: z.number().int().default(0),
@@ -21,8 +22,9 @@ class HttpError extends Error {
 
 timeSlotPairsRouter.get("/", async (req, res) => {
   const leagueId = typeof req.query.leagueId === "string" ? req.query.leagueId : undefined;
+  const seasonId = typeof req.query.seasonId === "string" ? req.query.seasonId : undefined;
   const pairs = await prisma.timeSlotPair.findMany({
-    where: leagueId ? { leagueId } : undefined,
+    where: { ...(leagueId ? { leagueId } : {}), ...(seasonId ? { seasonId } : {}) },
     include: { playerA: true, playerB: true },
     orderBy: { priority: "desc" },
   });
@@ -44,6 +46,9 @@ timeSlotPairsRouter.post("/", async (req, res) => {
     if (!playerA || !playerB) throw new HttpError(404, "One or both players were not found.");
     if (playerA.leagueId !== data.leagueId || playerB.leagueId !== data.leagueId) {
       throw new HttpError(400, "Both players must belong to the pair's league.");
+    }
+    if (playerA.seasonId !== data.seasonId || playerB.seasonId !== data.seasonId) {
+      throw new HttpError(400, "Both players must belong to the pair's season.");
     }
     if (!playerA.active || !playerB.active) {
       throw new HttpError(400, "Both players must be active to form a timeslot pair.");

@@ -69,10 +69,10 @@ async function main() {
     leagues.set(name, league.id);
   }
 
-  // Reseed players/pairs fresh each run (TeamSlot rows cascade-detach via
-  // the optional playerId FK, so this is safe even with existing teams).
-  await prisma.timeSlotPair.deleteMany({});
-  await prisma.player.deleteMany({});
+  // Rosters are season-scoped now — reseeding creates a fresh season each
+  // run rather than reusing/deleting into an existing one, since a season
+  // is meant to be a clean-slate roster anyway.
+  const season = await prisma.season.create({ data: { name: "Seed Season" } });
 
   const rosterRows = readCsv("roster.csv");
   const playerIds = new Map<string, string>(); // "League|Name" -> id
@@ -85,6 +85,7 @@ async function main() {
       data: {
         name: row.name,
         leagueId,
+        seasonId: season.id,
         canPlaySkip: toBool(row.canPlaySkip),
         canPlayVice: toBool(row.canPlayVice),
         canPlaySecond: toBool(row.canPlaySecond),
@@ -110,6 +111,7 @@ async function main() {
     await prisma.timeSlotPair.create({
       data: {
         leagueId,
+        seasonId: season.id,
         playerAId,
         playerBId,
         priority: priorityMap[row.priority] ?? 0,
@@ -118,7 +120,9 @@ async function main() {
     });
   }
 
-  console.log(`Seeded ${leagues.size} leagues, ${rosterRows.length} players, ${pairRows.length} pairs.`);
+  console.log(
+    `Seeded ${leagues.size} leagues, season "${season.name}", ${rosterRows.length} players, ${pairRows.length} pairs.`,
+  );
 }
 
 main()

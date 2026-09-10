@@ -6,7 +6,15 @@ import { api, type League, type Player, type TimeSlotPair } from "@/lib/api";
 
 const PRIORITY_LABELS: Record<number, string> = { 2: "High", 1: "Medium", 0: "Low" };
 
-export function PairsSection({ league, players }: { league: League; players: Player[] }) {
+export function PairsSection({
+  league,
+  seasonId,
+  players,
+}: {
+  league: League;
+  seasonId: string;
+  players: Player[];
+}) {
   const [pairs, setPairs] = useState<TimeSlotPair[] | null>(null);
   const [playerAId, setPlayerAId] = useState<string>("");
   const [playerBId, setPlayerBId] = useState<string>("");
@@ -15,7 +23,7 @@ export function PairsSection({ league, players }: { league: League; players: Pla
 
   const load = () => {
     api
-      .getPairs(league.id)
+      .getPairs(seasonId, league.id)
       .then(setPairs)
       .catch((err) => setError(err instanceof Error ? err.message : String(err)));
   };
@@ -24,13 +32,19 @@ export function PairsSection({ league, players }: { league: League; players: Pla
   // changes (not on every parent re-render, which creates a fresh
   // `players` array reference on every edit elsewhere on the page).
   const playerIdsKey = players.map((p) => p.id).join(",");
-  useEffect(load, [league.id, playerIdsKey]);
+  useEffect(load, [seasonId, league.id, playerIdsKey]);
 
   const addPair = async () => {
     if (!playerAId || !playerBId) return;
     setError(null);
     try {
-      const created = await api.createPair({ leagueId: league.id, playerAId, playerBId, priority: Number(priority) });
+      const created = await api.createPair({
+        leagueId: league.id,
+        seasonId,
+        playerAId,
+        playerBId,
+        priority: Number(priority),
+      });
       setPairs((prev) => [created, ...(prev ?? [])]);
       setPlayerAId("");
       setPlayerBId("");

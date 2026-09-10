@@ -42,7 +42,7 @@ teamsRouter.post("/cycles/:cycleId/teams/generate", async (req, res) => {
     const teamCount = cycle.teamCount as TeamCount;
 
     const activePlayers = await prisma.player.findMany({
-      where: { leagueId: cycle.leagueId, active: true },
+      where: { leagueId: cycle.leagueId, seasonId: cycle.seasonId, active: true },
     });
     const draftPlayers = activePlayers.map(toDraftPlayer);
 
@@ -50,7 +50,9 @@ teamsRouter.post("/cycles/:cycleId/teams/generate", async (req, res) => {
     if (issues.length > 0) throw new HttpError(400, "Roster is not ready for generation", issues);
 
     const activeIds = new Set(activePlayers.map((p) => p.id));
-    const pairs = await prisma.timeSlotPair.findMany({ where: { leagueId: cycle.leagueId } });
+    const pairs = await prisma.timeSlotPair.findMany({
+      where: { leagueId: cycle.leagueId, seasonId: cycle.seasonId },
+    });
     const draftPairs: DraftPair[] = pairs
       .filter((p) => activeIds.has(p.playerAId) && activeIds.has(p.playerBId))
       .map((p) => ({ id: p.id, playerAId: p.playerAId, playerBId: p.playerBId, priority: p.priority }));
@@ -126,8 +128,8 @@ teamsRouter.patch("/team-slots/:id", async (req, res) => {
     if (data.playerId !== null) {
       const player = await prisma.player.findUnique({ where: { id: data.playerId } });
       if (!player) throw new HttpError(404, "Player not found");
-      if (player.leagueId !== slot.team.cycle.leagueId) {
-        throw new HttpError(400, "Player does not belong to this cycle's league.");
+      if (player.leagueId !== slot.team.cycle.leagueId || player.seasonId !== slot.team.cycle.seasonId) {
+        throw new HttpError(400, "Player does not belong to this cycle's league/season.");
       }
       const duplicate = await prisma.teamSlot.findFirst({
         where: { teamId: slot.teamId, playerId: data.playerId, id: { not: slot.id } },

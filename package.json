@@ -12,9 +12,12 @@
     "prisma:generate": "npm run prisma:generate -w server",
     "prisma:migrate": "npm run prisma:migrate -w server",
     "prisma:studio": "npm run prisma:studio -w server",
-    "prisma:seed": "npm run prisma:seed -w server"
+    "prisma:seed": "npm run prisma:seed -w server",
+    "test": "npm run test -w server && npm run test -w client",
+    "test:e2e": "playwright test"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "concurrently": "^9.1.0"
   },
   "allowScripts": {

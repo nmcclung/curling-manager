@@ -28,6 +28,52 @@ instead and keep this pointing at it.
 - `npm run build` — builds both workspaces.
 - `npm run prisma:generate` / `prisma:migrate` / `prisma:studio` / `prisma:seed` — Prisma workflows, run against `server/prisma/schema.prisma`.
 - Add shadcn components with `npx shadcn@latest add <component> --yes` from `client/` (see shadcn/ui note below — plain `-y` alone isn't enough for `add`).
+- `npm test` — server (vitest: unit + real-DB integration tests) then client (vitest: unit tests) — see Testing below.
+- `npm run test:e2e` — Playwright, one real-browser spec covering the full core loop.
+
+## Testing
+
+Three layers, none of them ever touch `server/prisma/dev.db` (the actual
+dev/seed data) — the two automated layers use a throwaway DB, and the E2E
+layer works inside its own fully self-contained season on the real dev DB
+and deletes it when done.
+
+- **Server unit + integration tests** (`server/test/`, `vitest`, run via
+  `npm test -w server`): pure-function unit tests for the highest-risk
+  logic — `teamGeneration/generate.ts` (the specialist-oversupply gate,
+  Skip-never-SPARE, pair placement, zero-warnings on a well-tuned roster),
+  `teamGeneration/groups.ts`, and the committed `fixedSchedules.ts` data
+  (its two hard invariants: no repeat opponents, time-slot groups never
+  split across a draw) — plus Express-route integration tests (via
+  `supertest` against `src/app.ts`, which is `index.ts` minus the
+  `app.listen()` call so tests can drive it without binding a port) for
+  season-scoping, cascade deletes, and batch-update atomicity. These run
+  against a real SQLite file built fresh from the actual migration history
+  each run (`server/test/global-setup.ts` → `server/test/test.db`, gitignored),
+  not a hand-maintained schema copy that could drift. Each test gets its
+  own uniquely-named League+Season fixture (`server/test/helpers.ts`) so
+  parallel/rerun test files never collide on `League.name`'s uniqueness.
+  `server/test/rosterFixtures.ts` holds a synthetic-but-realistic roster
+  shape verified to generate warning-free (shared with
+  `scripts/simulate-season.ts`, which now imports it instead of keeping
+  its own copy) — a roster that just barely clears
+  `validateRosterForGeneration`'s minimums is *not* the same thing as one
+  the draft+redistribution algorithm can actually place warning-free, and
+  an earlier version of these tests learned that the hard way.
+- **Client unit tests** (`client/src/**/*.test.ts`, `vitest`): currently
+  just `lib/csv.ts` (the registration-CSV importer's parser) against a
+  sample mirroring the real export's quirks — report-header lines before
+  the real CSV header, a trailing empty column, whitespace-padded names.
+- **E2E** (`e2e/core-loop.spec.ts`, Playwright, root `playwright.config.ts`,
+  `npm run test:e2e`): drives a real Chromium browser through the actual
+  v1 core loop — create a season, seed a generation-ready roster, generate
+  teams, generate a schedule, view the printable page, toggle dark mode —
+  then deletes the season it created. Roster seeding happens via direct
+  API calls rather than 40+ scripted "Add Player" dialogs (impractically
+  slow/brittle; the UI itself is what's under test in the surrounding
+  steps, not bulk data entry). `webServer.reuseExistingServer: true`
+  unconditionally, since there's no CI here and `npm run dev` is usually
+  already running locally.
 
 ## Current state
 
@@ -45,14 +91,45 @@ The app has three routed pages (`react-router-dom`, shell + nav in
   a warning inline. Pair creation validates both players are active,
   client-side (the picker only lists active players) and server-side.
   Built and working.
+
+  **Roster import** (`client/src/features/roster/ImportRosterDialog.tsx`,
+  `client/src/lib/csv.ts`, `POST /api/players/import`) — brings in an
+  initial roster from the club's registration-tool CSV export (a
+  "League Registration Report", not our own internal format: First
+  Name/Last Name/Experience/Member Since/Notes for League Manager, with a
+  few report-header lines before the real CSV header — the header row is
+  located by content, not a fixed line offset, since that framing text
+  isn't guaranteed stable). Upload → editable preview table (rows matching
+  an existing player's name by case-insensitive exact match are flagged
+  "possible duplicate" and left unchecked, everything else checked by
+  default) → explicit "Import N" commit, so nothing hits the DB before a
+  human reviews it. Deliberately narrow about what it imports: name,
+  `experienceYears` (a new nullable `Player` field — years curling, from
+  the export's "Experience" column, shown/editable as its own roster-table
+  column now), and the raw "Notes for League Manager" text verbatim. It
+  does **not** infer `isNewCurler` or any position eligibility — this data
+  doesn't reliably distinguish "new to curling" from "new to this club,"
+  and there's no position-eligibility signal at all (occasional prose
+  mentions like "Vice or Second please!" aren't parsed). Every imported
+  player lands `active: false` with all four positions `false`
+  (server-enforced regardless of what the client sends), satisfying the
+  "active player needs ≥1 position" invariant automatically and leaving a
+  clear manual-review queue rather than guessing. Same reasoning killed
+  auto-detecting `TimeSlotPair` candidates from notes text (several rows
+  do reference another player by name, e.g. "I need to be on the same
+  draw as Wayne Lewchuk") — the raw note just imports as-is on that
+  player's `notes` field for a human to read and act on.
 - **Season/Cycle** (`server/src/routes/seasons.ts` + `cycles.ts`,
   `client/src/features/cycles/CyclePicker.tsx`) — create seasons and cycles
   (team count 12/14/16, cycle number auto-incremented per season+league).
-  Shared picker component used by both Teams and Schedule pages. Seasons
-  can also be deleted (cascades to all its cycles/teams/matches/schedules
-  via schema `onDelete: Cascade`) — safe in isolation since a season is a
-  hard history boundary, so no other season can reference into it. No
-  delete for individual cycles yet, only whole seasons. Built and working.
+  Shared picker component used by both Teams and Schedule pages (season
+  selection itself now lives in `SeasonPicker`, see the roster-scoping
+  invariant below — `CyclePicker` composes it alongside its own league/
+  cycle UI). Seasons can also be deleted (cascades to all its cycles/
+  teams/matches/schedules *and* its entire roster via schema `onDelete:
+  Cascade`) — safe in isolation since a season is a hard history boundary,
+  so no other season can reference into it. No delete for individual
+  cycles yet, only whole seasons. Built and working.
 - **Teams** (`client/src/features/teams/`, `server/src/teamGeneration/`,
   `server/src/routes/teams.ts`) — full team generation is built and working:
   roster-readiness checklist, "Generate Teams" (§5 algorithm: pair
@@ -251,6 +328,26 @@ instead of `src/`. Also pass `--overwrite` if a shared file (e.g.
 - A **season** is a hard reset shared across both leagues: cycle numbers
   restart at 1, and teammate history / decay never looks back across a
   season boundary.
+- **Rosters are season-scoped, not permanent** — `Player` and
+  `TimeSlotPair` both carry a `seasonId` (added after realizing a club's
+  actual roster can change dramatically season to season; originally they
+  only had `leagueId` and persisted forever, which was wrong). A season
+  starts with a genuinely empty roster per league; populate it via "Add
+  Player" or the CSV importer, same as before, just scoped one level
+  deeper now. Deleting a season cascades to its entire roster too, not
+  just cycles/teams/schedules. The intended workflow: create a season →
+  build its roster → generate cycles/teams/schedules, which can now only
+  ever draw from that season's own players (this was the actual bug being
+  fixed — team generation used to query by `leagueId` alone, so it would
+  silently pull in every player ever added to that league across every
+  season). `Player.name` uniqueness is `[seasonId, leagueId, name]` now,
+  not `[leagueId, name]` — the same name can exist independently in two
+  different seasons. `RosterPage` and `CyclePicker` both render a shared
+  `SeasonPicker` (`client/src/features/seasons/SeasonPicker.tsx`) for
+  season select/create/delete, extracted out of `CyclePicker` once Roster
+  needed the identical capability — its delete-confirmation summarizes
+  everything about to cascade away (players, pairs, cycles, teams,
+  matches, schedules), not just cycles like before.
 - **Skip can never be a SPARE** — this is a hard error, not a soft warning.
 - Team counts per cycle are only ever **12, 14, or 16** — don't generalize
   beyond that.

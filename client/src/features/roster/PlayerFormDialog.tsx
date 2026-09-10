@@ -27,6 +27,10 @@ const playerFormSchema = z
     isNewCurler: z.boolean(),
     active: z.boolean(),
     notes: z.string().trim(),
+    experienceYears: z
+      .string()
+      .trim()
+      .refine((v) => v === "" || /^\d+$/.test(v), "Must be a non-negative whole number"),
   })
   .refine((data) => !data.active || data.canPlaySkip || data.canPlayVice || data.canPlaySecond || data.canPlayLead, {
     message: "An active player must be eligible for at least one position.",
@@ -44,6 +48,7 @@ const emptyValues: PlayerFormValues = {
   isNewCurler: false,
   active: true,
   notes: "",
+  experienceYears: "",
 };
 
 function valuesFromPlayer(player: Player): PlayerFormValues {
@@ -56,6 +61,7 @@ function valuesFromPlayer(player: Player): PlayerFormValues {
     isNewCurler: player.isNewCurler,
     active: player.active,
     notes: player.notes ?? "",
+    experienceYears: player.experienceYears != null ? String(player.experienceYears) : "",
   };
 }
 
@@ -68,12 +74,14 @@ const POSITION_FIELDS = [
 
 export function PlayerFormDialog({
   league,
+  seasonId,
   player,
   open,
   onOpenChange,
   onSaved,
 }: {
   league: League;
+  seasonId: string;
   player?: Player;
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -95,7 +103,13 @@ export function PlayerFormDialog({
   const onSubmit = async (values: PlayerFormValues) => {
     setSubmitError(null);
     try {
-      const payload = { ...values, notes: values.notes || null, leagueId: league.id };
+      const payload = {
+        ...values,
+        notes: values.notes || null,
+        experienceYears: values.experienceYears === "" ? null : Number(values.experienceYears),
+        leagueId: league.id,
+        seasonId,
+      };
       if (player) {
         await api.updatePlayer(player.id, payload);
       } else {
@@ -181,6 +195,30 @@ export function PlayerFormDialog({
             {form.formState.errors.active && (
               <p className="text-sm text-destructive">{form.formState.errors.active.message}</p>
             )}
+
+            <FormField
+              control={form.control}
+              name="experienceYears"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Years of experience</FormLabel>
+                  <FormControl>
+                    <Input
+                      {...field}
+                      type="text"
+                      inputMode="numeric"
+                      placeholder="Optional"
+                      className="w-24"
+                      onChange={(e) => {
+                        const v = e.target.value.trim();
+                        if (v === "" || /^\d+$/.test(v)) field.onChange(v);
+                      }}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
 
             <FormField
               control={form.control}

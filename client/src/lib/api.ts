@@ -7,6 +7,7 @@ export type Player = {
   id: string;
   name: string;
   leagueId: string;
+  seasonId: string;
   canPlaySkip: boolean;
   canPlayVice: boolean;
   canPlaySecond: boolean;
@@ -14,13 +15,20 @@ export type Player = {
   isNewCurler: boolean;
   active: boolean;
   notes: string | null;
+  experienceYears: number | null;
 };
 
 export type PlayerInput = Omit<Player, "id">;
 
+export type LastCyclePositions = {
+  cycleNumber: number | null;
+  positions: Record<string, Position>;
+};
+
 export type TimeSlotPair = {
   id: string;
   leagueId: string;
+  seasonId: string;
   playerAId: string;
   playerBId: string;
   priority: number;
@@ -31,6 +39,7 @@ export type TimeSlotPair = {
 
 export type TimeSlotPairInput = {
   leagueId: string;
+  seasonId: string;
   playerAId: string;
   playerBId: string;
   priority: number;
@@ -130,16 +139,29 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 export const api = {
   getLeagues: () => request<League[]>("/api/leagues"),
 
-  getPlayers: (leagueId: string) => request<Player[]>(`/api/players?leagueId=${leagueId}`),
+  getPlayers: (seasonId: string, leagueId: string) =>
+    request<Player[]>(`/api/players?seasonId=${seasonId}&leagueId=${leagueId}`),
+  getLastCyclePositions: (seasonId: string, leagueId: string) =>
+    request<LastCyclePositions>(`/api/players/last-cycle-positions?seasonId=${seasonId}&leagueId=${leagueId}`),
   createPlayer: (input: PlayerInput) =>
     request<Player>("/api/players", { method: "POST", body: JSON.stringify(input) }),
   updatePlayer: (id: string, patch: Partial<PlayerInput>) =>
     request<Player>(`/api/players/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
   batchUpdatePlayers: (updates: { id: string; patch: Partial<PlayerInput> }[]) =>
     request<Player[]>("/api/players/batch", { method: "PATCH", body: JSON.stringify({ updates }) }),
+  importPlayers: (
+    seasonId: string,
+    leagueId: string,
+    players: { name: string; notes?: string | null; experienceYears?: number | null }[],
+  ) =>
+    request<Player[]>("/api/players/import", {
+      method: "POST",
+      body: JSON.stringify({ seasonId, leagueId, players }),
+    }),
   deletePlayer: (id: string) => request<void>(`/api/players/${id}`, { method: "DELETE" }),
 
-  getPairs: (leagueId: string) => request<TimeSlotPair[]>(`/api/timeslot-pairs?leagueId=${leagueId}`),
+  getPairs: (seasonId: string, leagueId: string) =>
+    request<TimeSlotPair[]>(`/api/timeslot-pairs?seasonId=${seasonId}&leagueId=${leagueId}`),
   createPair: (input: TimeSlotPairInput) =>
     request<TimeSlotPair>("/api/timeslot-pairs", { method: "POST", body: JSON.stringify(input) }),
   deletePair: (id: string) => request<void>(`/api/timeslot-pairs/${id}`, { method: "DELETE" }),

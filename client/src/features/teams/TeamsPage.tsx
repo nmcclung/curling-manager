@@ -42,8 +42,8 @@ function CycleTeams({ league, cycle }: { league: League; cycle: Cycle }) {
   const [generating, setGenerating] = useState(false);
 
   useEffect(() => {
-    api.getPlayers(league.id).then(setPlayers);
-  }, [league.id]);
+    api.getPlayers(cycle.seasonId, league.id).then(setPlayers);
+  }, [cycle.seasonId, league.id]);
 
   const loadTeams = () => {
     api

@@ -11,6 +11,7 @@
 import { generateTeams, validateRosterForGeneration } from "../src/teamGeneration/generate.js";
 import { POSITIONS } from "../src/teamGeneration/types.js";
 import type { DraftPair, DraftPlayer, HistoryMap, TeamCount, WorkingTeam } from "../src/teamGeneration/types.js";
+import { buildSyntheticRoster as buildSyntheticRosterPlayers } from "../test/rosterFixtures.js";
 
 const CYCLES_PER_SEASON = 7;
 const SEASONS_PER_CONFIG = 12; // independent repeats, since a single run has its own randomness
@@ -18,54 +19,13 @@ const RESTART_TRIALS = 300;
 const DECAY_RATE = 1 / 6;
 
 // --- Synthetic roster construction ------------------------------------
+// Player-shape construction itself lives in test/rosterFixtures.ts (shared
+// with the unit tests, which rely on the same "verified warning-free"
+// property this script exists to establish) — this just layers on the
+// renaming + pairing this simulation additionally needs.
 
-let nextId = 0;
-function player(overrides: Partial<DraftPlayer> & Pick<DraftPlayer, "canPlaySkip" | "canPlayVice" | "canPlaySecond" | "canPlayLead">): DraftPlayer {
-  const eligibilityCount =
-    Number(overrides.canPlaySkip) + Number(overrides.canPlayVice) + Number(overrides.canPlaySecond) + Number(overrides.canPlayLead);
-  const frontEndEligibilityCount = Number(overrides.canPlayVice) + Number(overrides.canPlaySecond) + Number(overrides.canPlayLead);
-  nextId++;
-  return {
-    id: `p${nextId}`,
-    name: `Player ${nextId}`,
-    isNewCurler: false,
-    eligibilityCount,
-    frontEndEligibilityCount,
-    ...overrides,
-  };
-}
-
-// Realistic-ish proportions mirroring what we've seen in real roster data:
-// skip specialists dominate skip-eligibility, front-end positions have a
-// healthy mix of specialists and versatile generalists. Kept just under the
-// specialist-oversupply gate (teamCount) for skip specifically.
-function buildSyntheticRoster(teamCount: TeamCount): { players: DraftPlayer[]; pairs: DraftPair[] } {
-  const players: DraftPlayer[] = [];
-
-  // Tuned so total per-position demand comfortably covers teamCount slots
-  // via *versatile* players (not just barely-passing the specialist-only
-  // gate) — mirrors what a healthy real roster looks like (verified
-  // warning-free below before this is trusted for the full simulation).
-  const skipOnly = teamCount - 2;
-  const skipGeneralist = 3;
-  const viceOnly = Math.round(teamCount * 0.25);
-  const secondOnly = Math.round(teamCount * 0.25);
-  const leadOnly = Math.round(teamCount * 0.25);
-  const viceSecond = Math.round(teamCount * 0.55);
-  const viceLead = Math.round(teamCount * 0.35);
-  const secondLead = Math.round(teamCount * 0.35);
-  const allFrontEnd = Math.round(teamCount * 0.5);
-
-  for (let i = 0; i < skipOnly; i++) players.push(player({ canPlaySkip: true, canPlayVice: false, canPlaySecond: false, canPlayLead: false }));
-  for (let i = 0; i < skipGeneralist; i++) players.push(player({ canPlaySkip: true, canPlayVice: true, canPlaySecond: false, canPlayLead: false }));
-  for (let i = 0; i < viceOnly; i++) players.push(player({ canPlaySkip: false, canPlayVice: true, canPlaySecond: false, canPlayLead: false }));
-  for (let i = 0; i < secondOnly; i++) players.push(player({ canPlaySkip: false, canPlayVice: false, canPlaySecond: true, canPlayLead: false }));
-  for (let i = 0; i < leadOnly; i++)
-    players.push(player({ canPlaySkip: false, canPlayVice: false, canPlaySecond: false, canPlayLead: true, isNewCurler: i % 3 === 0 }));
-  for (let i = 0; i < viceSecond; i++) players.push(player({ canPlaySkip: false, canPlayVice: true, canPlaySecond: true, canPlayLead: false }));
-  for (let i = 0; i < viceLead; i++) players.push(player({ canPlaySkip: false, canPlayVice: true, canPlaySecond: false, canPlayLead: true }));
-  for (let i = 0; i < secondLead; i++) players.push(player({ canPlaySkip: false, canPlayVice: false, canPlaySecond: true, canPlayLead: true }));
-  for (let i = 0; i < allFrontEnd; i++) players.push(player({ canPlaySkip: false, canPlayVice: true, canPlaySecond: true, canPlayLead: true }));
+function buildSyntheticRoster(teamCount: TeamCount): { players: ReturnType<typeof buildSyntheticRosterPlayers>; pairs: DraftPair[] } {
+  const players = buildSyntheticRosterPlayers(teamCount);
 
   players.forEach((p, i) => {
     p.name = `Player ${i + 1}`;

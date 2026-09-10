@@ -5,9 +5,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { api, type League, type Player, type PlayerInput } from "@/lib/api";
+import { api, type LastCyclePositions, type League, type Player, type PlayerInput, type Position } from "@/lib/api";
+import { ImportRosterDialog } from "@/features/roster/ImportRosterDialog";
 import { PairsSection } from "@/features/roster/PairsSection";
 import { PlayerFormDialog } from "@/features/roster/PlayerFormDialog";
+import { SeasonPicker } from "@/features/seasons/SeasonPicker";
 
 const POSITION_FIELDS: { key: keyof PlayerInput; label: string }[] = [
   { key: "canPlaySkip", label: "Skip" },
@@ -15,6 +17,8 @@ const POSITION_FIELDS: { key: keyof PlayerInput; label: string }[] = [
   { key: "canPlaySecond", label: "Second" },
   { key: "canPlayLead", label: "Lead" },
 ];
+
+const POSITION_LABELS: Record<Position, string> = { SKIP: "Skip", VICE: "Vice", SECOND: "Second", LEAD: "Lead" };
 
 type SortMode = "status-asc" | "status-desc" | "name-asc" | "name-desc";
 
@@ -78,8 +82,9 @@ function compare(a: Player, b: Player, mode: SortMode): number {
 export function RosterPage() {
   const [leagues, setLeagues] = useState<League[] | null>(null);
   const [activeLeagueId, setActiveLeagueId] = useState<string>("");
-  // Ref, not state — this only needs to be read at tab-switch time, and
-  // updating it shouldn't itself trigger a RosterPage re-render.
+  const [seasonId, setSeasonId] = useState<string>("");
+  // Ref, not state — this only needs to be read at tab/season-switch time,
+  // and updating it shouldn't itself trigger a RosterPage re-render.
   const dirtyCounts = useRef<Record<string, number>>({});
 
   useEffect(() => {
@@ -94,42 +99,65 @@ export function RosterPage() {
   // Unsaved edits live only in LeagueRoster's local state and are lost when
   // its tab unmounts (Radix Tabs unmounts inactive content) — confirm first
   // rather than silently discarding a batch of staged changes.
-  const handleTabChange = (next: string) => {
+  const confirmDiscardIfDirty = () => {
     const currentDirty = dirtyCounts.current[activeLeagueId] ?? 0;
-    if (currentDirty > 0) {
-      const proceed = window.confirm(
-        `You have ${currentDirty} unsaved change${currentDirty === 1 ? "" : "s"} on this tab. Switch tabs and discard ${currentDirty === 1 ? "it" : "them"}?`,
-      );
-      if (!proceed) return;
-    }
-    setActiveLeagueId(next);
+    if (currentDirty === 0) return true;
+    return window.confirm(
+      `You have ${currentDirty} unsaved change${currentDirty === 1 ? "" : "s"} on this tab. Discard ${currentDirty === 1 ? "it" : "them"}?`,
+    );
+  };
+
+  const handleTabChange = (next: string) => {
+    if (confirmDiscardIfDirty()) setActiveLeagueId(next);
+  };
+
+  const handleSeasonChange = (next: string) => {
+    if (confirmDiscardIfDirty()) setSeasonId(next);
   };
 
   return (
-    <Tabs value={activeLeagueId} onValueChange={handleTabChange} className="w-full">
-      <TabsList>
-        {leagues.map((league) => (
-          <TabsTrigger key={league.id} value={league.id}>
-            {league.name}
-          </TabsTrigger>
-        ))}
-      </TabsList>
-      {leagues.map((league) => (
-        <TabsContent key={league.id} value={league.id}>
-          <LeagueRoster
-            league={league}
-            onDirtyCountChange={(count) => {
-              dirtyCounts.current[league.id] = count;
-            }}
-          />
-        </TabsContent>
-      ))}
-    </Tabs>
+    <div className="space-y-4">
+      <SeasonPicker seasonId={seasonId} onSeasonIdChange={handleSeasonChange} />
+
+      {!seasonId ? (
+        <p className="text-sm text-muted-foreground">Select or create a season to manage its roster.</p>
+      ) : (
+        <Tabs value={activeLeagueId} onValueChange={handleTabChange} className="w-full">
+          <TabsList>
+            {leagues.map((league) => (
+              <TabsTrigger key={league.id} value={league.id}>
+                {league.name}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+          {leagues.map((league) => (
+            <TabsContent key={league.id} value={league.id}>
+              <LeagueRoster
+                league={league}
+                seasonId={seasonId}
+                onDirtyCountChange={(count) => {
+                  dirtyCounts.current[league.id] = count;
+                }}
+              />
+            </TabsContent>
+          ))}
+        </Tabs>
+      )}
+    </div>
   );
 }
 
-function LeagueRoster({ league, onDirtyCountChange }: { league: League; onDirtyCountChange: (count: number) => void }) {
+function LeagueRoster({
+  league,
+  seasonId,
+  onDirtyCountChange,
+}: {
+  league: League;
+  seasonId: string;
+  onDirtyCountChange: (count: number) => void;
+}) {
   const [players, setPlayers] = useState<Player[] | null>(null);
+  const [lastCyclePositions, setLastCyclePositions] = useState<LastCyclePositions | null>(null);
   // Checkbox/note edits are staged here (keyed by player id) instead of
   // hitting the API immediately — the "Save Changes" button below commits
   // them all as one batch request. This is what actually fixes the felt
@@ -138,18 +166,32 @@ function LeagueRoster({ league, onDirtyCountChange }: { league: League; onDirtyC
   const [pendingChanges, setPendingChanges] = useState<Record<string, Partial<PlayerInput>>>({});
   const [saving, setSaving] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [editingPlayer, setEditingPlayer] = useState<Player | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
   const [sortMode, setSortMode] = useState<SortMode>("status-asc");
 
   const loadPlayers = () => {
     api
-      .getPlayers(league.id)
+      .getPlayers(seasonId, league.id)
       .then(setPlayers)
       .catch((err) => setError(err instanceof Error ? err.message : String(err)));
   };
 
-  useEffect(loadPlayers, [league.id]);
+  useEffect(loadPlayers, [seasonId, league.id]);
+
+  useEffect(() => {
+    api.getLastCyclePositions(seasonId, league.id).then(setLastCyclePositions);
+  }, [seasonId, league.id]);
+
+  // This component stays mounted across a season switch (only the league
+  // tab remounts it, per TabsContent's key) — without this, stale staged
+  // edits keyed by a previous season's player ids would silently linger in
+  // state and could get sent along with the next save.
+  useEffect(() => {
+    setPendingChanges({});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seasonId]);
 
   useEffect(() => {
     onDirtyCountChange(Object.keys(pendingChanges).length);
@@ -187,7 +229,7 @@ function LeagueRoster({ league, onDirtyCountChange }: { league: League; onDirtyC
     setError(null);
     if (!active) {
       try {
-        const pairs = await api.getPairs(league.id);
+        const pairs = await api.getPairs(seasonId, league.id);
         const involved = pairs.filter((p) => p.playerAId === player.id || p.playerBId === player.id);
         if (involved.length > 0) {
           const partnerNames = involved.map((p) => (p.playerAId === player.id ? p.playerB : p.playerA).name).join(", ");
@@ -209,7 +251,7 @@ function LeagueRoster({ league, onDirtyCountChange }: { league: League; onDirtyC
     setError(null);
     let warning = "";
     try {
-      const pairs = await api.getPairs(league.id);
+      const pairs = await api.getPairs(seasonId, league.id);
       const pairCount = pairs.filter((p) => p.playerAId === player.id || p.playerBId === player.id).length;
       if (pairCount > 0) {
         warning = ` They are in ${pairCount} timeslot pair${pairCount === 1 ? "" : "s"}, which will also be deleted.`;
@@ -289,6 +331,9 @@ function LeagueRoster({ league, onDirtyCountChange }: { league: League; onDirtyC
               </Button>
             </>
           )}
+          <Button variant="outline" onClick={() => setImportDialogOpen(true)}>
+            Import CSV
+          </Button>
           <Button onClick={openCreate}>Add Player</Button>
         </div>
       </div>
@@ -307,9 +352,16 @@ function LeagueRoster({ league, onDirtyCountChange }: { league: League; onDirtyC
                   {f.label}
                 </TableHead>
               ))}
+              <TableHead className="w-24 text-center">Experience</TableHead>
               <TableHead className="text-center">New Curler</TableHead>
               <TableHead className="cursor-pointer select-none text-center" onClick={toggleStatusSort}>
                 Active {sortArrow("status-asc", "status-desc")}
+              </TableHead>
+              <TableHead className="text-center">
+                Last Cycle
+                {lastCyclePositions?.cycleNumber != null && (
+                  <span className="ml-1 font-normal text-muted-foreground">({lastCyclePositions.cycleNumber})</span>
+                )}
               </TableHead>
               <TableHead>Notes</TableHead>
               <TableHead className="text-right">Actions</TableHead>
@@ -333,6 +385,20 @@ function LeagueRoster({ league, onDirtyCountChange }: { league: League; onDirtyC
                   </TableCell>
                 ))}
                 <TableCell className="text-center">
+                  <Input
+                    type="text"
+                    inputMode="numeric"
+                    value={player.experienceYears ?? ""}
+                    onChange={(e) => {
+                      const v = e.target.value.trim();
+                      if (v === "" || /^\d+$/.test(v)) {
+                        stageField(player, { experienceYears: v === "" ? null : Number(v) });
+                      }
+                    }}
+                    className="mx-auto h-8 w-16 text-center"
+                  />
+                </TableCell>
+                <TableCell className="text-center">
                   <Checkbox
                     checked={player.isNewCurler}
                     onCheckedChange={(checked) => stageField(player, { isNewCurler: !!checked })}
@@ -340,6 +406,11 @@ function LeagueRoster({ league, onDirtyCountChange }: { league: League; onDirtyC
                 </TableCell>
                 <TableCell className="text-center">
                   <Checkbox checked={player.active} onCheckedChange={(checked) => setActive(player, !!checked)} />
+                </TableCell>
+                <TableCell className="text-center text-sm text-muted-foreground">
+                  {lastCyclePositions?.positions[player.id]
+                    ? POSITION_LABELS[lastCyclePositions.positions[player.id]]
+                    : "—"}
                 </TableCell>
                 <TableCell className="max-w-48">
                   <EditableNotesCell notes={player.notes} onSave={(notes) => stageField(player, { notes })} />
@@ -364,10 +435,11 @@ function LeagueRoster({ league, onDirtyCountChange }: { league: League; onDirtyC
         </Table>
       </div>
 
-      <PairsSection league={league} players={activePlayers} />
+      <PairsSection league={league} seasonId={seasonId} players={activePlayers} />
 
       <PlayerFormDialog
         league={league}
+        seasonId={seasonId}
         player={editingPlayer}
         open={dialogOpen}
         onOpenChange={setDialogOpen}
@@ -377,6 +449,15 @@ function LeagueRoster({ league, onDirtyCountChange }: { league: League; onDirtyC
           if (editingPlayer) clearPending(editingPlayer.id);
           loadPlayers();
         }}
+      />
+
+      <ImportRosterDialog
+        league={league}
+        seasonId={seasonId}
+        existingPlayers={players ?? []}
+        open={importDialogOpen}
+        onOpenChange={setImportDialogOpen}
+        onImported={(created) => setPlayers((prev) => [...(prev ?? []), ...created])}
       />
     </div>
   );

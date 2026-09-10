@@ -22,6 +22,15 @@ dist-ssr
 server/prisma/dev.db
 server/prisma/dev.db-journal
 
+# Test SQLite DB (built fresh from migrations each test run — see test/global-setup.ts)
+server/test/test.db*
+
+# Playwright
+/test-results/
+/playwright-report/
+/e2e/.auth/
+node_modules/.cache/playwright
+
 # Logs
 logs
 *.log

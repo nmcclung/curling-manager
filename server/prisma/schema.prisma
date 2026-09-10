@@ -28,10 +28,12 @@ model League {
 // in isolation since history/decay never crosses a season boundary by
 // design, so no *other* season's data can ever reference into this one.
 model Season {
-  id        String   @id @default(cuid())
-  name      String
-  startedAt DateTime @default(now())
-  cycles    Cycle[]
+  id            String         @id @default(cuid())
+  name          String
+  startedAt     DateTime       @default(now())
+  cycles        Cycle[]
+  players       Player[]
+  timeSlotPairs TimeSlotPair[]
 }
 
 // --- Cycle -------------------------------------------------------------
@@ -98,6 +100,13 @@ model TeamSlot {
 model Player {
   id            String  @id @default(cuid())
   name          String
+  // Rosters are per-season, not permanent — a league's actual roster can
+  // change dramatically season to season, so players (and their eligibility/
+  // active/notes state) belong to one specific season, not the league
+  // forever. Deleting a season deletes its players along with everything
+  // else tied to it (cycles, teams, schedules).
+  season        Season  @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+  seasonId      String
   league        League  @relation(fields: [leagueId], references: [id])
   leagueId      String
   canPlaySkip   Boolean @default(false)
@@ -107,18 +116,30 @@ model Player {
   isNewCurler   Boolean @default(false)
   active        Boolean @default(true)
   notes         String?
+  // Years curling, as reported on the club's registration form. Nullable —
+  // only known for players brought in via CSV import; manually-added
+  // players have no source for it. Purely informational (shown alongside
+  // the roster); isNewCurler stays a separate, manually-set flag rather
+  // than being inferred from this, since the registration data alone
+  // doesn't reliably distinguish "new to curling" from "new to this club."
+  experienceYears Int?
 
   teamSlots      TeamSlot[]
   pairsAsPlayerA TimeSlotPair[] @relation("PairPlayerA")
   pairsAsPlayerB TimeSlotPair[] @relation("PairPlayerB")
 
-  // Draft: unique per league+name. Invariant #4 (§4) is actually scoped to
+  // Unique per season+league+name. Invariant #4 (§4) is actually scoped to
   // "active roster" only — revisit if that distinction matters in practice.
-  @@unique([leagueId, name])
+  @@unique([seasonId, leagueId, name])
 }
 
 model TimeSlotPair {
   id        String  @id @default(cuid())
+  // Denormalized alongside leagueId (same pattern as Match storing cycleId
+  // directly) rather than only implied through playerA/playerB — keeps
+  // "pairs for this season+league" a plain filter, no join needed.
+  season    Season  @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+  seasonId  String
   league    League  @relation(fields: [leagueId], references: [id])
   leagueId  String
   playerA   Player  @relation("PairPlayerA", fields: [playerAId], references: [id], onDelete: Cascade)
