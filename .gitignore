@@ -1,0 +1,41 @@
+# Dependencies
+node_modules
+
+# Build output
+dist
+dist-ssr
+
+# Env / secrets
+.env
+.env.local
+
+# Raw roster exports containing real player names — never commit these.
+# Anonymized derivatives live in server/prisma/seed-data/.
+/roster*seed.csv
+/timeslotpairs*seed.csv
+
+# Old Apps Script source, kept locally for reference while reimplementing —
+# not part of this project, no need to version it.
+/reference/
+
+# SQLite database + local Prisma artifacts
+server/prisma/dev.db
+server/prisma/dev.db-journal
+
+# Logs
+logs
+*.log
+npm-debug.log*
+
+# Editor / OS
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+*.local

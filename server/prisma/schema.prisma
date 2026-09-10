@@ -1,0 +1,165 @@
+// Draft schema based on curling-app-intent-doc.md §7.
+// First pass — expect to refine as we build the real features.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// --- League & Season -------------------------------------------------
+
+// Fixed set of two (Monday, Tuesday) — modeled as a table rather than an
+// enum because SQLite/Prisma doesn't support native enums.
+model League {
+  id            String         @id @default(cuid())
+  name          String         @unique // "Monday" | "Tuesday"
+  players       Player[]
+  cycles        Cycle[]
+  timeSlotPairs TimeSlotPair[]
+}
+
+// Shared across both leagues (§2, §4.7). Starting a new season is a
+// complete fresh start for both leagues at once — no carryover.
+model Season {
+  id        String   @id @default(cuid())
+  name      String
+  startedAt DateTime @default(now())
+  cycles    Cycle[]
+}
+
+// --- Cycle -------------------------------------------------------------
+
+// Belongs to both a season and a league. cycleNumber is scoped/reset per
+// season (never continuous across a season boundary — §4.7, §5).
+model Cycle {
+  id          String   @id @default(cuid())
+  season      Season   @relation(fields: [seasonId], references: [id])
+  seasonId    String
+  league      League   @relation(fields: [leagueId], references: [id])
+  leagueId    String
+  cycleNumber Int
+  teamCount   Int // 12 | 14 | 16 (§2)
+  createdAt   DateTime @default(now())
+
+  teams    Team[]
+  matches  Match[]
+  schedule Schedule?
+
+  @@unique([seasonId, leagueId, cycleNumber])
+}
+
+// --- Team & roster slots ------------------------------------------------
+
+// NOTE: no timeSlot (early/late) field here — confirmed against the old
+// system's fixed schedule matrix that a team's draw time varies week to
+// week (e.g. in the 12-team matrix, Team 1 plays early in weeks 1-2 but
+// late in weeks 3-4), so it's not a fixed per-team-per-cycle attribute.
+// Draw time is correctly a per-match property (see Match.drawTime below).
+// The "time-slot group" used during team *generation* (pairing placement,
+// swap-optimization scope) is a separate, purely algorithmic grouping of
+// team numbers with no early/late meaning — computed on the fly from
+// teamNumber + cycle.teamCount (server/src/teamGeneration/groups.ts),
+// not persisted.
+model Team {
+  id         String @id @default(cuid())
+  cycle      Cycle  @relation(fields: [cycleId], references: [id])
+  cycleId    String
+  teamNumber Int
+
+  slots       TeamSlot[]
+  homeMatches Match[]    @relation("HomeTeam")
+  awayMatches Match[]    @relation("AwayTeam")
+
+  @@unique([cycleId, teamNumber])
+}
+
+// One row per position on a team. playerId null => filled with a SPARE
+// placeholder (§5 step 5). Position values: "SKIP" | "VICE" | "SECOND" | "LEAD".
+model TeamSlot {
+  id       String  @id @default(cuid())
+  team     Team    @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  teamId   String
+  position String
+  player   Player? @relation(fields: [playerId], references: [id], onDelete: SetNull)
+  playerId String?
+
+  @@unique([teamId, position])
+}
+
+// --- Player & pairing -----------------------------------------------
+
+model Player {
+  id            String  @id @default(cuid())
+  name          String
+  league        League  @relation(fields: [leagueId], references: [id])
+  leagueId      String
+  canPlaySkip   Boolean @default(false)
+  canPlayVice   Boolean @default(false)
+  canPlaySecond Boolean @default(false)
+  canPlayLead   Boolean @default(false)
+  isNewCurler   Boolean @default(false)
+  active        Boolean @default(true)
+  notes         String?
+
+  teamSlots      TeamSlot[]
+  pairsAsPlayerA TimeSlotPair[] @relation("PairPlayerA")
+  pairsAsPlayerB TimeSlotPair[] @relation("PairPlayerB")
+
+  // Draft: unique per league+name. Invariant #4 (§4) is actually scoped to
+  // "active roster" only — revisit if that distinction matters in practice.
+  @@unique([leagueId, name])
+}
+
+model TimeSlotPair {
+  id        String  @id @default(cuid())
+  league    League  @relation(fields: [leagueId], references: [id])
+  leagueId  String
+  playerA   Player  @relation("PairPlayerA", fields: [playerAId], references: [id], onDelete: Cascade)
+  playerAId String
+  playerB   Player  @relation("PairPlayerB", fields: [playerBId], references: [id], onDelete: Cascade)
+  playerBId String
+  priority  Int     @default(0)
+  notes     String?
+}
+
+// NOTE: no dedicated TeammateHistory table — per §7 it's derived/queryable
+// from past cycles' Team/TeamSlot assignments (Cycle -> Season scopes it to
+// the current season automatically). Revisit if querying it live turns out
+// to be too slow and we want a materialized table instead.
+
+// --- Schedule & matches --------------------------------------------------
+
+// One Match per (week, draw, sheet) within a cycle. drawTime is "EARLY" |
+// "LATE" — a per-match property, since a team's draw time actually varies
+// week to week (see the note on the Team model). A ghost game (isGhost =
+// true) has no real teams and renders as "open" (§2).
+model Match {
+  id          String  @id @default(cuid())
+  cycle       Cycle   @relation(fields: [cycleId], references: [id])
+  cycleId     String
+  weekNumber  Int // 1..4
+  drawTime    String // "EARLY" | "LATE"
+  sheetNumber Int // 1..4
+  homeTeam    Team?   @relation("HomeTeam", fields: [homeTeamId], references: [id], onDelete: SetNull)
+  homeTeamId  String?
+  awayTeam    Team?   @relation("AwayTeam", fields: [awayTeamId], references: [id], onDelete: SetNull)
+  awayTeamId  String?
+  isGhost     Boolean @default(false)
+
+  @@unique([cycleId, weekNumber, drawTime, sheetNumber])
+}
+
+// Per-cycle status wrapper around a cycle's Matches. isStale is set when
+// team assignments change after generation, cleared only by manual review
+// (§3, §7) — never auto-cleared by regeneration.
+model Schedule {
+  id          String   @id @default(cuid())
+  cycle       Cycle    @relation(fields: [cycleId], references: [id])
+  cycleId     String   @unique
+  isStale     Boolean  @default(false)
+  generatedAt DateTime @default(now())
+}
