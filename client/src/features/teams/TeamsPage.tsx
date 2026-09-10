@@ -22,7 +22,17 @@ export function TeamsPage() {
   );
 }
 
-type Requirement = { label: string; required: number; actual: number };
+type Requirement = { label: string; required: number; actual: number; direction: "min" | "max" };
+
+function passes(req: Requirement): boolean {
+  return req.direction === "min" ? req.actual >= req.required : req.actual <= req.required;
+}
+
+type PositionKey = "canPlaySkip" | "canPlayVice" | "canPlaySecond" | "canPlayLead";
+
+function eligibilityCount(p: Player): number {
+  return [p.canPlaySkip, p.canPlayVice, p.canPlaySecond, p.canPlayLead].filter(Boolean).length;
+}
 
 function CycleTeams({ league, cycle }: { league: League; cycle: Cycle }) {
   const [players, setPlayers] = useState<Player[] | null>(null);
@@ -45,26 +55,66 @@ function CycleTeams({ league, cycle }: { league: League; cycle: Cycle }) {
 
   const active = players?.filter((p) => p.active) ?? [];
   const count = (fn: (p: Player) => boolean) => active.filter(fn).length;
+  const specialistCount = (key: PositionKey) => active.filter((p) => p[key] && eligibilityCount(p) === 1).length;
 
-  // Invariants from intent doc §4 — always-applicable checks the server
-  // re-validates authoritatively before generating.
+  // Invariants from intent doc §4 (min requirements) plus a derived, fully
+  // deterministic check (max requirements): single-position specialists for
+  // a position compete only against each other for exactly `teamCount`
+  // slots, with zero fallback if they lose — Skip can never be a SPARE, and
+  // Vice/Second/Lead specialists who miss out aren't retried elsewhere
+  // since every slot for their one position is already full. The server
+  // re-validates all of this authoritatively before generating.
   const requirements: Requirement[] = players
     ? [
-        { label: "Roster size (min)", required: cycle.teamCount * 3, actual: active.length },
-        { label: "Roster size (max)", required: cycle.teamCount * 4, actual: active.length },
-        { label: "Skip-eligible", required: cycle.teamCount, actual: count((p) => p.canPlaySkip) },
-        { label: "Vice-eligible", required: cycle.teamCount - 3, actual: count((p) => p.canPlayVice) },
-        { label: "Second-eligible", required: cycle.teamCount - 3, actual: count((p) => p.canPlaySecond) },
-        { label: "Lead-eligible", required: cycle.teamCount - 3, actual: count((p) => p.canPlayLead) },
+        { label: "Roster size (min)", required: cycle.teamCount * 3, actual: active.length, direction: "min" },
+        { label: "Roster size (max)", required: cycle.teamCount * 4, actual: active.length, direction: "max" },
+        { label: "Skip-eligible", required: cycle.teamCount, actual: count((p) => p.canPlaySkip), direction: "min" },
+        {
+          label: "Vice-eligible",
+          required: cycle.teamCount - 3,
+          actual: count((p) => p.canPlayVice),
+          direction: "min",
+        },
+        {
+          label: "Second-eligible",
+          required: cycle.teamCount - 3,
+          actual: count((p) => p.canPlaySecond),
+          direction: "min",
+        },
+        {
+          label: "Lead-eligible",
+          required: cycle.teamCount - 3,
+          actual: count((p) => p.canPlayLead),
+          direction: "min",
+        },
+        {
+          label: "Skip-only specialists",
+          required: cycle.teamCount,
+          actual: specialistCount("canPlaySkip"),
+          direction: "max",
+        },
+        {
+          label: "Vice-only specialists",
+          required: cycle.teamCount,
+          actual: specialistCount("canPlayVice"),
+          direction: "max",
+        },
+        {
+          label: "Second-only specialists",
+          required: cycle.teamCount,
+          actual: specialistCount("canPlaySecond"),
+          direction: "max",
+        },
+        {
+          label: "Lead-only specialists",
+          required: cycle.teamCount,
+          actual: specialistCount("canPlayLead"),
+          direction: "max",
+        },
       ]
     : [];
 
-  const sizeOk = active.length >= cycle.teamCount * 3 && active.length <= cycle.teamCount * 4;
-  const skipOk = count((p) => p.canPlaySkip) >= cycle.teamCount;
-  const viceOk = count((p) => p.canPlayVice) >= cycle.teamCount - 3;
-  const secondOk = count((p) => p.canPlaySecond) >= cycle.teamCount - 3;
-  const leadOk = count((p) => p.canPlayLead) >= cycle.teamCount - 3;
-  const readyToGenerate = sizeOk && skipOk && viceOk && secondOk && leadOk;
+  const readyToGenerate = requirements.length > 0 && requirements.every(passes);
 
   const generate = async () => {
     if (teams && teams.length > 0) {
@@ -111,11 +161,11 @@ function CycleTeams({ league, cycle }: { league: League; cycle: Cycle }) {
           <ul className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm sm:grid-cols-3">
             {requirements.map((req) => (
               <li key={req.label} className="flex items-center gap-2">
-                <span className={req.actual >= req.required ? "text-green-600" : "text-destructive"}>
-                  {req.actual >= req.required ? "✓" : "✗"}
+                <span className={passes(req) ? "text-green-600" : "text-destructive"}>
+                  {passes(req) ? "✓" : "✗"}
                 </span>
                 <span className="text-muted-foreground">
-                  {req.label}: {req.actual} / {req.required}
+                  {req.label}: {req.actual} {req.direction === "min" ? `/ ${req.required}` : `(limit ${req.required})`}
                 </span>
               </li>
             ))}

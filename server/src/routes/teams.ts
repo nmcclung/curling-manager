@@ -3,6 +3,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../prisma.js";
 import { generateTeams, validateRosterForGeneration } from "../teamGeneration/generate.js";
+import { getTeamGroupIndex } from "../teamGeneration/groups.js";
 import { computeSeasonHistory } from "../teamGeneration/history.js";
 import type { DraftPair, DraftPlayer, TeamCount } from "../teamGeneration/types.js";
 
@@ -146,12 +147,20 @@ teamsRouter.patch("/team-slots/:id", async (req, res) => {
   }
 });
 
+// groupIndex is the team-generation time-slot group (teamGeneration/groups.ts)
+// this team belongs to — included here purely for display (e.g. the printable
+// schedule color-codes teams by group, mirroring the old system, since that's
+// the actual mechanism keeping TimeSlotPair members together).
 async function fetchTeamsWithPlayers(cycleId: string) {
-  return prisma.team.findMany({
+  const cycle = await prisma.cycle.findUnique({ where: { id: cycleId } });
+  const teams = await prisma.team.findMany({
     where: { cycleId },
     orderBy: { teamNumber: "asc" },
     include: { slots: { include: { player: true } } },
   });
+  if (!cycle) return teams.map((t) => ({ ...t, groupIndex: 0 }));
+  const teamCount = cycle.teamCount as TeamCount;
+  return teams.map((t) => ({ ...t, groupIndex: getTeamGroupIndex(t.teamNumber, teamCount) }));
 }
 
 function handleError(err: unknown, res: import("express").Response) {

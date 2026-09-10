@@ -45,10 +45,99 @@ export function validateRosterForGeneration(players: DraftPlayer[], teamCount: T
     }
   }
 
+  // Single-position specialists compete only against each other for exactly
+  // `teamCount` slots in that one position, with zero fallback if they lose
+  // — Skip can never be a SPARE, and Vice/Second/Lead specialists who miss
+  // out aren't retried elsewhere since every slot for their one position is
+  // already taken. So this isn't a "might happen" risk: if specialists for a
+  // position outnumber its slots, exactly (specialists - slots) of them are
+  // guaranteed to end up unplaced every single generation run.
+  for (const [label, key] of [
+    ["Skip", "canPlaySkip"],
+    ["Vice", "canPlayVice"],
+    ["Second", "canPlaySecond"],
+    ["Lead", "canPlayLead"],
+  ] as const) {
+    const specialists = players.filter((p) => p.eligibilityCount === 1 && p[key]).length;
+    if (specialists > teamCount) {
+      issues.push(
+        `${specialists} players are eligible for ${label} only, but there are only ${teamCount} ${label} slots — ` +
+          `${specialists - teamCount} of them are guaranteed to be left without a team. Add another eligible ` +
+          `position to some of their profiles, or deactivate the excess for this cycle.`,
+      );
+    }
+  }
+
   return issues;
 }
 
+/**
+ * Total decay-weighted teammate conflict across the whole generated roster
+ * — each co-located pair on a team counted once. 0 means no repeat
+ * teammates at all (season-scoped, per the history map passed in).
+ */
+export function totalConflictScore(teams: WorkingTeam[], history: HistoryMap): number {
+  let total = 0;
+  for (const team of teams) {
+    const occupants = POSITIONS.map((p) => team.slots[p]).filter((v): v is string => v !== null && v !== "SPARE");
+    for (let i = 0; i < occupants.length; i++) {
+      for (let j = i + 1; j < occupants.length; j++) {
+        total += history.get(occupants[i])?.get(occupants[j]) ?? 0;
+      }
+    }
+  }
+  return total;
+}
+
+// Random-restart search (§5 was previously a single deterministic-ish pass
+// — Apps Script's execution-time budget was the reason, not a deliberate
+// design choice, and that constraint no longer applies here). Each trial
+// re-shuffles pair order, draft order, and versatile-phase team order (see
+// shuffle() calls throughout this file), so different trials can land on
+// meaningfully different greedy draft paths; the swap-optimization pass
+// then locally polishes whichever one a trial produces. We keep whichever
+// trial has the fewest warnings first (an unplaced player/pair is a much
+// worse outcome than a nonzero conflict score), then the lowest conflict
+// score. Cheap: a single trial is well under a millisecond for realistic
+// roster sizes. 1000 was picked from a scaling test (scripts/simulate-
+// season.ts) — quality gains diminish sharply past ~1000-3000 trials (a
+// small residual conflict persists even at 8000, suggesting a real ceiling
+// for this swap-based local search, not just under-searching), and even
+// 1000 trials finishes in well under 100ms for realistic roster sizes, so
+// there's no real cost to erring generous here.
+const GENERATION_TRIALS = 1000;
+const UNPLACED_PENALTY_WEIGHT = 10000;
+
+function trialScore(result: GenerationResult): number {
+  return result.warnings.length * UNPLACED_PENALTY_WEIGHT + result.conflictScore;
+}
+
 export function generateTeams(params: {
+  teamCount: TeamCount;
+  cycleNumber: number;
+  players: DraftPlayer[];
+  pairs: DraftPair[];
+  history: HistoryMap;
+  trials?: number;
+}): GenerationResult {
+  const trials = params.trials ?? GENERATION_TRIALS;
+
+  let best = generateTeamsOnce(params);
+  let bestScore = trialScore(best);
+
+  for (let i = 1; i < trials && bestScore > 0; i++) {
+    const candidate = generateTeamsOnce(params);
+    const score = trialScore(candidate);
+    if (score < bestScore) {
+      bestScore = score;
+      best = candidate;
+    }
+  }
+
+  return best;
+}
+
+function generateTeamsOnce(params: {
   teamCount: TeamCount;
   cycleNumber: number;
   players: DraftPlayer[];
@@ -89,7 +178,7 @@ export function generateTeams(params: {
     performSwapOptimization(teams, groups, playersById, history, pairedPlayerIds);
   }
 
-  return { teams, warnings };
+  return { teams, warnings, conflictScore: totalConflictScore(teams, history) };
 }
 
 function shuffle<T>(items: T[]): T[] {
@@ -225,9 +314,15 @@ function placePairs(
       }
     }
 
+    const pairPositionSummary =
+      `${playerA.name} (considered for ${positionsA.map((p) => POSITION_LABELS[p]).join("/")}), ` +
+      `${playerB.name} (considered for ${positionsB.map((p) => POSITION_LABELS[p]).join("/")})`;
+
     if (bestGroup === -1) {
       warnings.push(
-        `Could not place pair ${playerA.name} & ${playerB.name} together — no time-slot group had room for both; they'll be drafted individually.`,
+        `Could not place pair ${playerA.name} & ${playerB.name} together — no time-slot group had open slots for both at once (${pairPositionSummary}). ` +
+          "They'll be drafted individually instead, so may not end up playing at the same time. " +
+          "To resolve: lower this pair's priority so it's tried later (when it might not matter), or manually move one onto the other's team after generation.",
       );
       continue;
     }
@@ -235,7 +330,9 @@ function placePairs(
     const groupTeams = groups[bestGroup];
     const teamA = assignPlayerToGroupTeam(teams, groupTeams, playerA.id, positionsA);
     if (teamA === null) {
-      warnings.push(`Could not place ${playerA.name} for pair with ${playerB.name} — they'll be drafted individually.`);
+      warnings.push(
+        `Could not place ${playerA.name} for pair with ${playerB.name} (${pairPositionSummary}) — they'll be drafted individually.`,
+      );
       continue;
     }
     assignedPlayerIds.add(playerA.id);
@@ -250,7 +347,8 @@ function placePairs(
       }
       assignedPlayerIds.delete(playerA.id);
       warnings.push(
-        `Could not place pair ${playerA.name} & ${playerB.name} together — rolled back; they'll be drafted individually.`,
+        `Could not place pair ${playerA.name} & ${playerB.name} together — rolled back after placing ${playerA.name} (${pairPositionSummary}). ` +
+          "They'll be drafted individually instead, so may not end up playing at the same time.",
       );
       continue;
     }
@@ -372,9 +470,63 @@ function draftRemaining(
   draftVersatile(teams, playersById, history, assignedPlayerIds, available);
 
   if (available.length > 0) {
-    const names = available.map((id) => playersById.get(id)!.name).join(", ");
-    warnings.push(`${available.length} player(s) could not be placed by any drafting phase: ${names}.`);
+    const allPlayers = [...playersById.values()];
+    for (const id of available) {
+      warnings.push(explainUnassignedPlayer(playersById.get(id)!, allPlayers, teams.length));
+    }
   }
+}
+
+const POSITION_LABELS: Record<Position, string> = { SKIP: "Skip", VICE: "Vice", SECOND: "Second", LEAD: "Lead" };
+
+function eligiblePositionsOf(player: DraftPlayer): Position[] {
+  const positions: Position[] = [];
+  if (player.canPlaySkip) positions.push("SKIP");
+  if (player.canPlayVice) positions.push("VICE");
+  if (player.canPlaySecond) positions.push("SECOND");
+  if (player.canPlayLead) positions.push("LEAD");
+  return positions;
+}
+
+function countEligibleFor(position: Position, players: DraftPlayer[]): number {
+  switch (position) {
+    case "SKIP":
+      return players.filter((p) => p.canPlaySkip).length;
+    case "VICE":
+      return players.filter((p) => p.canPlayVice).length;
+    case "SECOND":
+      return players.filter((p) => p.canPlaySecond).length;
+    case "LEAD":
+      return players.filter((p) => p.canPlayLead).length;
+  }
+}
+
+// A player only ends up here when every position they're eligible for was
+// already filled elsewhere by the time drafting finished — usually because
+// there are more eligible players for that position than there are slots
+// (teamCount slots per position) and this player lost out on all of them.
+// Explaining *why*, not just *who*, is what actually lets someone act on
+// this warning (edit eligibility, deactivate, or manually place them).
+function explainUnassignedPlayer(player: DraftPlayer, allPlayers: DraftPlayer[], teamCount: number): string {
+  const positions = eligiblePositionsOf(player);
+  if (positions.length === 0) {
+    return `${player.name} has no eligible position at all — this shouldn't be possible for an active player; check their profile.`;
+  }
+
+  const supplyDetails = positions
+    .map((pos) => `${POSITION_LABELS[pos]} (${countEligibleFor(pos, allPlayers)} eligible players for ${teamCount} slots)`)
+    .join(", ");
+
+  const skipOnly = positions.length === 1 && positions[0] === "SKIP";
+  const reason = skipOnly
+    ? "Skip can never be filled by a SPARE, so a Skip-only player who loses out once Skip fills up has no fallback position."
+    : "Every position they're eligible for was already filled by other players by the time drafting finished.";
+
+  return (
+    `${player.name} could not be placed — eligible for: ${supplyDetails}. ${reason} ` +
+    "To resolve: mark them inactive for this cycle, add another eligible position to their profile, " +
+    "or manually place them on a team with an open slot after generation (manual overrides don't check eligibility)."
+  );
 }
 
 function redistributeForSpareLimit(

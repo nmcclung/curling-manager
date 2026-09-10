@@ -12,6 +12,19 @@ const POSITION_LABELS: Record<Position, string> = {
 
 const SPARE = "__SPARE__";
 
+function isEligibleForPosition(player: Player, position: Position): boolean {
+  switch (position) {
+    case "SKIP":
+      return player.canPlaySkip;
+    case "VICE":
+      return player.canPlayVice;
+    case "SECOND":
+      return player.canPlaySecond;
+    case "LEAD":
+      return player.canPlayLead;
+  }
+}
+
 export function TeamGrid({
   teams,
   players,
@@ -24,6 +37,12 @@ export function TeamGrid({
   const [error, setError] = useState<string | null>(null);
 
   const activePlayers = players.filter((p) => p.active).sort((a, b) => a.name.localeCompare(b.name));
+
+  // Anyone already on a team in this cycle — excluded from *other* slots'
+  // dropdowns (a player can only be on one team), but never from their own
+  // current slot.
+  const assignedElsewhere = new Set<string>();
+  for (const t of teams) for (const s of t.slots) if (s.playerId) assignedElsewhere.add(s.playerId);
 
   const updateSlot = async (slotId: string, value: string) => {
     setError(null);
@@ -48,12 +67,20 @@ export function TeamGrid({
                 if (!slot) return null;
                 const isSpare = slot.playerId === null;
 
-                // Make sure the currently-assigned player always appears as an
-                // option, even if they've since been deactivated.
+                // Eligible for this position, and either free or already the
+                // current occupant of *this* slot.
+                const eligible = activePlayers.filter(
+                  (p) =>
+                    isEligibleForPosition(p, position) && (p.id === slot.playerId || !assignedElsewhere.has(p.id)),
+                );
+
+                // A manual override can place someone regardless of eligibility
+                // (intentional escape hatch — see generation warnings), and the
+                // current occupant might since have been deactivated. Either
+                // way, make sure they still appear so the dropdown reflects
+                // reality instead of silently hiding the current value.
                 const options =
-                  slot.player && !activePlayers.some((p) => p.id === slot.player!.id)
-                    ? [...activePlayers, slot.player]
-                    : activePlayers;
+                  slot.player && !eligible.some((p) => p.id === slot.player!.id) ? [...eligible, slot.player] : eligible;
 
                 return (
                   <div key={slot.id} className="flex items-center justify-between gap-2">

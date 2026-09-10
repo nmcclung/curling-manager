@@ -54,6 +54,8 @@ export type Cycle = {
   createdAt: string;
 };
 
+export type CycleWithDetails = Cycle & { season: Season; league: League };
+
 export type Position = "SKIP" | "VICE" | "SECOND" | "LEAD";
 
 export type TeamSlot = {
@@ -69,11 +71,47 @@ export type Team = {
   cycleId: string;
   teamNumber: number;
   slots: TeamSlot[];
+  /** Team-generation time-slot group (teamGeneration/groups.ts) this team belongs to — for display only. */
+  groupIndex: number;
 };
 
 export type GenerateTeamsResult = {
   teams: Team[];
   warnings: string[];
+};
+
+export type DrawTime = "EARLY" | "LATE";
+
+export type MatchTeam = {
+  id: string;
+  teamNumber: number;
+  slots: { player: Player | null }[]; // filtered to the SKIP slot by the API
+};
+
+export type Match = {
+  id: string;
+  cycleId: string;
+  weekNumber: number;
+  drawTime: DrawTime;
+  sheetNumber: number;
+  homeTeamId: string | null;
+  awayTeamId: string | null;
+  isGhost: boolean;
+  homeTeam: MatchTeam | null;
+  awayTeam: MatchTeam | null;
+};
+
+export type Schedule = {
+  id: string;
+  cycleId: string;
+  isStale: boolean;
+  generatedAt: string;
+  startDate: string | null;
+};
+
+export type ScheduleWithMatches = {
+  schedule: Schedule | null;
+  matches: Match[];
 };
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
@@ -107,9 +145,11 @@ export const api = {
   getSeasons: () => request<Season[]>("/api/seasons"),
   createSeason: (name: string) =>
     request<Season>("/api/seasons", { method: "POST", body: JSON.stringify({ name }) }),
+  deleteSeason: (id: string) => request<void>(`/api/seasons/${id}`, { method: "DELETE" }),
 
   getCycles: (seasonId: string, leagueId: string) =>
     request<Cycle[]>(`/api/cycles?seasonId=${seasonId}&leagueId=${leagueId}`),
+  getCycle: (id: string) => request<CycleWithDetails>(`/api/cycles/${id}`),
   createCycle: (input: { seasonId: string; leagueId: string; teamCount: TeamCount }) =>
     request<Cycle>("/api/cycles", { method: "POST", body: JSON.stringify(input) }),
 
@@ -118,4 +158,15 @@ export const api = {
     request<GenerateTeamsResult>(`/api/cycles/${cycleId}/teams/generate`, { method: "POST", body: "{}" }),
   updateTeamSlot: (slotId: string, playerId: string | null) =>
     request<TeamSlot>(`/api/team-slots/${slotId}`, { method: "PATCH", body: JSON.stringify({ playerId }) }),
+
+  getSchedule: (cycleId: string) => request<ScheduleWithMatches>(`/api/cycles/${cycleId}/schedule`),
+  generateSchedule: (cycleId: string) =>
+    request<ScheduleWithMatches>(`/api/cycles/${cycleId}/schedule/generate`, { method: "POST", body: "{}" }),
+  markScheduleReviewed: (cycleId: string) =>
+    request<Schedule>(`/api/cycles/${cycleId}/schedule/mark-reviewed`, { method: "PATCH", body: "{}" }),
+  updateScheduleStartDate: (cycleId: string, startDate: string | null) =>
+    request<Schedule>(`/api/cycles/${cycleId}/schedule/start-date`, {
+      method: "PATCH",
+      body: JSON.stringify({ startDate }),
+    }),
 };

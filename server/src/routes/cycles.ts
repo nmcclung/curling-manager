@@ -24,6 +24,18 @@ cyclesRouter.get("/", async (req, res) => {
   res.json(cycles);
 });
 
+cyclesRouter.get("/:id", async (req, res) => {
+  const cycle = await prisma.cycle.findUnique({
+    where: { id: req.params.id },
+    include: { season: true, league: true },
+  });
+  if (!cycle) {
+    res.status(404).json({ error: "Cycle not found" });
+    return;
+  }
+  res.json(cycle);
+});
+
 cyclesRouter.post("/", async (req, res) => {
   const parsed = cycleInput.safeParse(req.body);
   if (!parsed.success) {

@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { NavLink, Navigate, Route, BrowserRouter, Routes } from "react-router-dom";
 import { cn } from "cn";
+import { PrintSchedulePage } from "@/features/schedule/PrintSchedulePage";
 import { RosterPage } from "@/features/roster/RosterPage";
 import { SchedulePage } from "@/features/schedule/SchedulePage";
 import { TeamsPage } from "@/features/teams/TeamsPage";
@@ -45,14 +46,35 @@ function Layout({ children }: { children: ReactNode }) {
 function App() {
   return (
     <BrowserRouter>
-      <Layout>
-        <Routes>
-          <Route path="/" element={<Navigate to="/roster" replace />} />
-          <Route path="/roster" element={<RosterPage />} />
-          <Route path="/teams" element={<TeamsPage />} />
-          <Route path="/schedule" element={<SchedulePage />} />
-        </Routes>
-      </Layout>
+      <Routes>
+        <Route path="/" element={<Navigate to="/roster" replace />} />
+        <Route
+          path="/roster"
+          element={
+            <Layout>
+              <RosterPage />
+            </Layout>
+          }
+        />
+        <Route
+          path="/teams"
+          element={
+            <Layout>
+              <TeamsPage />
+            </Layout>
+          }
+        />
+        <Route
+          path="/schedule"
+          element={
+            <Layout>
+              <SchedulePage />
+            </Layout>
+          }
+        />
+        {/* No Layout — this is a standalone printable page (no app nav/chrome). */}
+        <Route path="/print/:cycleId" element={<PrintSchedulePage />} />
+      </Routes>
     </BrowserRouter>
   );
 }

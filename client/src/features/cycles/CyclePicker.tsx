@@ -31,6 +31,8 @@ export function CyclePicker({
 
   const [seasonDialogOpen, setSeasonDialogOpen] = useState(false);
   const [cycleDialogOpen, setCycleDialogOpen] = useState(false);
+  const [deletingSeason, setDeletingSeason] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     api.getLeagues().then((data) => {
@@ -53,6 +55,39 @@ export function CyclePicker({
 
   useEffect(loadCycles, [seasonId, leagueId]);
 
+  const deleteSeason = async () => {
+    if (!seasons) return;
+    const season = seasons.find((s) => s.id === seasonId);
+    if (!season || !leagues) return;
+
+    setError(null);
+    setDeletingSeason(true);
+    try {
+      // Count cycles across *both* leagues (this picker only has the
+      // currently-selected league's cycles loaded) so the confirm reflects
+      // everything that's actually about to be deleted.
+      const counts = await Promise.all(leagues.map((l) => api.getCycles(seasonId, l.id)));
+      const totalCycles = counts.reduce((sum, c) => sum + c.length, 0);
+
+      const proceed = window.confirm(
+        totalCycles > 0
+          ? `Delete season "${season.name}"? This permanently deletes all ${totalCycles} cycle(s) across both leagues — their teams, matches, and schedules included. This cannot be undone.`
+          : `Delete season "${season.name}"? It has no cycles yet. This cannot be undone.`,
+      );
+      if (!proceed) return;
+
+      await api.deleteSeason(seasonId);
+      setSeasons((prev) => (prev ?? []).filter((s) => s.id !== seasonId));
+      setSeasonId("");
+      setCycles(null);
+      setCycleId("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setDeletingSeason(false);
+    }
+  };
+
   const league = leagues?.find((l) => l.id === leagueId) ?? null;
   const cycle = cycles?.find((c) => c.id === cycleId) ?? null;
 
@@ -67,6 +102,7 @@ export function CyclePicker({
 
   return (
     <div className="space-y-4">
+      {error && <p className="text-sm text-destructive">{error}</p>}
       <div className="flex flex-wrap items-center gap-3">
         <Select value={seasonId} onValueChange={setSeasonId}>
           <SelectTrigger className="w-56">
@@ -83,6 +119,17 @@ export function CyclePicker({
         <Button variant="outline" size="sm" onClick={() => setSeasonDialogOpen(true)}>
           New Season
         </Button>
+        {seasonId && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+            disabled={deletingSeason}
+            onClick={deleteSeason}
+          >
+            Delete Season
+          </Button>
+        )}
 
         <Tabs value={leagueId} onValueChange={setLeagueId}>
           <TabsList>

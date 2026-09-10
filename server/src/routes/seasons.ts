@@ -22,3 +22,15 @@ seasonsRouter.post("/", async (req, res) => {
   const season = await prisma.season.create({ data: parsed.data });
   res.status(201).json(season);
 });
+
+// Cascades to all of this season's cycles/teams/matches/schedules (schema
+// onDelete: Cascade). Safe in isolation — history/decay never crosses a
+// season boundary, so no other season can reference into this one.
+seasonsRouter.delete("/:id", async (req, res) => {
+  try {
+    await prisma.season.delete({ where: { id: req.params.id } });
+    res.status(204).end();
+  } catch {
+    res.status(404).json({ error: "Season not found" });
+  }
+});

@@ -36,24 +36,118 @@ The app has three routed pages (`react-router-dom`, shell + nav in
 - **Season/Cycle** (`server/src/routes/seasons.ts` + `cycles.ts`,
   `client/src/features/cycles/CyclePicker.tsx`) — create seasons and cycles
   (team count 12/14/16, cycle number auto-incremented per season+league).
-  Shared picker component used by both Teams and Schedule pages. Built and
-  working.
+  Shared picker component used by both Teams and Schedule pages. Seasons
+  can also be deleted (cascades to all its cycles/teams/matches/schedules
+  via schema `onDelete: Cascade`) — safe in isolation since a season is a
+  hard history boundary, so no other season can reference into it. No
+  delete for individual cycles yet, only whole seasons. Built and working.
 - **Teams** (`client/src/features/teams/`, `server/src/teamGeneration/`,
   `server/src/routes/teams.ts`) — full team generation is built and working:
   roster-readiness checklist, "Generate Teams" (§5 algorithm: pair
   placement, priority-ordered drafting, redistribution, SPARE-filling,
   season-scoped decay-weighted history + bounded swap optimization from
-  cycle 2 on), a team grid, and manual per-slot override (each slot is a
-  player-reassignment dropdown, SPARE excluded for Skip). Regenerating an
-  already-generated cycle asks for confirmation and flags any existing
-  Schedule stale. See `server/src/teamGeneration/` for the pure algorithm
+  cycle 2 on, plus a random-restart wrapper — see below), a team grid, and manual per-slot override (each slot's
+  dropdown is filtered to players eligible for that position who aren't
+  already on another team this cycle — plus the slot's current occupant
+  even if they no longer qualify, since a manual override doesn't enforce
+  eligibility; SPARE is offered for every position except Skip, which can
+  never be one). Generation warnings (unplaceable player / pair) name real
+  numbers (e.g. "19 eligible players for 16 slots") and concrete next
+  steps, not just names — the dropdown filtering above is what actually
+  lets someone act on them (e.g. swap a leftover skip-only specialist into
+  an open Skip slot).
+
+  **Single-position-specialist oversupply is a gated, not advisory, check**
+  (roster readiness checklist *and* `validateRosterForGeneration` server-
+  side — both must pass, generation returns 400 otherwise). This is derived
+  from §4 rather than stated there directly, but it's fully deterministic,
+  not a heuristic: a player eligible for exactly one position competes only
+  against same-position specialists for that position's `teamCount` slots,
+  with zero fallback if they lose (Skip can never be a SPARE; Vice/Second/
+  Lead specialists who miss out aren't retried elsewhere since every slot
+  for their one position is already full by the time they'd be reconsidered).
+  So "specialists for position X > teamCount" doesn't just risk a leftover
+  player, it guarantees exactly `specialists - teamCount` of them every run
+  — worth gating rather than leaving as a post-hoc warning.
+
+  **Random-restart wrapper** (`generateTeams` in `generate.ts` — the single-
+  pass logic moved to `generateTeamsOnce`): runs the full draft+swap-
+  optimization pipeline up to `GENERATION_TRIALS` (1000) times with fresh
+  shuffles, keeps whichever trial has the fewest warnings, then the lowest
+  `totalConflictScore`. The old system ran a single deterministic-ish pass
+  because Apps Script's execution-time budget forced it to — that
+  constraint doesn't apply here, and this was cheap to add (a single trial
+  is sub-millisecond; even 1000 finishes in well under 100ms end-to-end,
+  confirmed against a real API call). Validated with
+  `server/scripts/simulate-season.ts` (synthetic-but-valid rosters per team
+  count, no DB writes, 12 independent repeats of a 7-cycle season, trials=1
+  baseline vs trials=1000) before committing to it — restart eliminated
+  generation warnings entirely (0.00 avg every cycle, every config, vs. up
+  to ~1.25/cycle for the single-pass baseline) and cut residual teammate-
+  conflict roughly in half to a quarter by cycle 7 across all three team
+  counts. A follow-up trial-count scaling check found diminishing returns
+  past ~1000-3000 trials — a small residual conflict persists even at 8000
+  trials, suggesting a real ceiling for this swap-based local search rather
+  than under-searching. **This is the "start simple" checkpoint**: if a
+  real season later shows a league unhappy with late-season repeat
+  teammates despite this, that residual-ceiling finding is the evidence
+  that motivates reaching for something bigger (the problem is small enough
+  for an exact MIP/CP solver — e.g. `highs.js`, a WASM solver with no
+  native-binding build story — to find the provable optimum instead; not
+  attempted yet since this hasn't been shown necessary).
+
+  Regenerating an already-generated cycle asks for
+  confirmation and flags any existing Schedule stale. See
+  `server/src/teamGeneration/` for the pure algorithm
   (`generate.ts`, `groups.ts`, `history.ts`, `score.ts`) — it's a faithful
   port of the old system's actual logic (see `reference/` below), not a
   guess at the intent doc's prose summary.
-- **Schedule** (`client/src/features/schedule/SchedulePage.tsx`) — picks a
-  cycle, UI still a placeholder. But the fixed matchup **data** it'll read
-  from is done: `server/src/scheduleGeneration/fixedSchedules.ts` is
-  generated (not hand-written) by `server/scripts/generate-fixed-schedules.ts`,
+- **Schedule** (`client/src/features/schedule/`, `server/src/routes/schedule.ts`,
+  `server/src/scheduleGeneration/generateMatches.ts`) — full generation is
+  built and working: maps the fixed matchup table onto a cycle's actual
+  `Team` rows (by `teamNumber`) into `Match` rows, requires the cycle's
+  teams to exist first (400 with a clear message otherwise), renders a
+  printable-style weekly grid (Sheet × Early/Late, ghost games as "open",
+  skip name shown per team). `Schedule.isStale` is wired end-to-end: set by
+  either team regeneration or a manual `TeamSlot` edit (already handled in
+  `routes/teams.ts`), shown as a banner with two ways to clear it —
+  regenerating the schedule, or an explicit "Mark Reviewed" button for
+  when no regeneration is actually needed (§3's "manually reviewed/rerun").
+
+  **Printable export** (`client/src/features/schedule/PrintSchedulePage.tsx`,
+  route `/print/:cycleId`, deliberately rendered *outside* `App.tsx`'s
+  `Layout` — no nav/chrome, just the printable content): a standalone page
+  showing the two sections the old Sheets printable schedule had (verified
+  against `reference/ScheduleGenerator.gs` before building this) — a team
+  roster grid (all 4 positions per team) and the weekly matchup grid with
+  real calendar dates. Dates come from `Schedule.startDate` (new field,
+  optional — set via a date input right on this page, `PATCH
+  .../schedule/start-date`; falls back to "Week 1"/"Week 2" labels if
+  unset), computed the same way the old system did (`startDate + 7*(N-1)
+  days` per week). PDF export is just the browser's native
+  print-to-PDF (a "Print / Export PDF" button calling `window.print()`) —
+  no PDF-generation dependency needed. The page always renders in fixed
+  light colors (not the theme-aware tokens the rest of the app uses), since
+  print output should look right on paper regardless of the viewer's
+  system theme.
+
+  **Color-coding matches the old system**: team roster cards are colored by
+  `Team.groupIndex` (new API field, computed server-side via
+  `getTeamGroupIndex` in `fetchTeamsWithPlayers`, `routes/teams.ts` — not
+  stored, derived from `teamNumber` + `cycle.teamCount` same as everywhere
+  else groups are used) using the same pastel palette
+  `reference/ScheduleGenerator.gs` used (`applyTeamSectionFormatting`).
+  This isn't just cosmetic parity — group membership is the actual
+  mechanism keeping a `TimeSlotPair` together (see the Season/Cycle
+  invariants below), so same-colored teams are genuinely "linked." The
+  schedule table's sheet-number columns are shown once in a `<thead>`
+  (colored with the old system's sheet palette) instead of repeating
+  "Sheet N" on every match, with alternating week row shading for
+  readability — both direct asks after the first version came out
+  functional but visually flat.
+
+  The fixed matchup **data** itself is generated (not hand-written) by
+  `server/scripts/generate-fixed-schedules.ts`,
   satisfying two HARD constraints by construction plus a ranked set of
   best-effort soft ones:
   1. No team plays the same opponent twice within the cycle (round-robin
@@ -95,9 +189,13 @@ The app has three routed pages (`react-router-dom`, shell + nav in
   Re-run the script (`npx tsx scripts/generate-fixed-schedules.ts` from
   `server/`) and it overwrites `fixedSchedules.ts` with a fresh random draw
   if the approach ever needs revisiting — don't hand-edit that file, and
-  don't regress constraint 2 if you do touch the script again.
-  Still to build: the actual Match-row generation from this data plus the
-  route/UI wiring on the Schedule page.
+  don't regress constraint 2 (or the worst-case-sheet-repeat guard) if you
+  do touch the script again.
+
+With this, all three pages (Roster, Teams, Schedule) are functionally
+complete for the core v1 loop: build a roster, generate teams, generate a
+schedule. Not yet built: exporting/printing the schedule, standings/scores
+(explicitly out of v1 scope per §3), and any polish pass on the UI itself.
 
 **`reference/`** (gitignored, local-only) holds the old Apps Script source
 (`main.gs`, `TeamGenerator.gs`, `ScheduleGenerator.gs`, `DataManager.gs`,

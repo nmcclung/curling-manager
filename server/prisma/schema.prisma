@@ -23,7 +23,10 @@ model League {
 }
 
 // Shared across both leagues (§2, §4.7). Starting a new season is a
-// complete fresh start for both leagues at once — no carryover.
+// complete fresh start for both leagues at once — no carryover. Deleting a
+// season cascades to all its cycles/teams/matches/schedules — safe to do
+// in isolation since history/decay never crosses a season boundary by
+// design, so no *other* season's data can ever reference into this one.
 model Season {
   id        String   @id @default(cuid())
   name      String
@@ -37,7 +40,7 @@ model Season {
 // season (never continuous across a season boundary — §4.7, §5).
 model Cycle {
   id          String   @id @default(cuid())
-  season      Season   @relation(fields: [seasonId], references: [id])
+  season      Season   @relation(fields: [seasonId], references: [id], onDelete: Cascade)
   seasonId    String
   league      League   @relation(fields: [leagueId], references: [id])
   leagueId    String
@@ -66,7 +69,7 @@ model Cycle {
 // not persisted.
 model Team {
   id         String @id @default(cuid())
-  cycle      Cycle  @relation(fields: [cycleId], references: [id])
+  cycle      Cycle  @relation(fields: [cycleId], references: [id], onDelete: Cascade)
   cycleId    String
   teamNumber Int
 
@@ -139,7 +142,7 @@ model TimeSlotPair {
 // true) has no real teams and renders as "open" (§2).
 model Match {
   id          String  @id @default(cuid())
-  cycle       Cycle   @relation(fields: [cycleId], references: [id])
+  cycle       Cycle   @relation(fields: [cycleId], references: [id], onDelete: Cascade)
   cycleId     String
   weekNumber  Int // 1..4
   drawTime    String // "EARLY" | "LATE"
@@ -154,12 +157,19 @@ model Match {
 }
 
 // Per-cycle status wrapper around a cycle's Matches. isStale is set when
-// team assignments change after generation, cleared only by manual review
-// (§3, §7) — never auto-cleared by regeneration.
+// team assignments change (edit or regeneration) after the schedule was
+// generated. Regenerating *teams* again never clears it by itself — only
+// two schedule-focused actions do: regenerating the schedule (which
+// directly re-syncs it with current teams) or an explicit "mark reviewed"
+// action (§3, §7) for cases where no regeneration is actually needed.
 model Schedule {
-  id          String   @id @default(cuid())
-  cycle       Cycle    @relation(fields: [cycleId], references: [id])
-  cycleId     String   @unique
-  isStale     Boolean  @default(false)
-  generatedAt DateTime @default(now())
+  id          String    @id @default(cuid())
+  cycle       Cycle     @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  cycleId     String    @unique
+  isStale     Boolean   @default(false)
+  generatedAt DateTime  @default(now())
+  // Calendar date of week 1 (used to print real dates on the weekly
+  // schedule, e.g. "Jan 5, Jan 12, ..."). Optional — the printable
+  // schedule falls back to "Week 1"/"Week 2" labels if unset.
+  startDate   DateTime?
 }

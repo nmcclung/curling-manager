@@ -39,4 +39,6 @@ export type HistoryMap = Map<string, Map<string, number>>;
 export type GenerationResult = {
   teams: WorkingTeam[];
   warnings: string[];
+  /** Total decay-weighted teammate-conflict across the whole roster (0 = no repeat teammates at all). */
+  conflictScore: number;
 };
