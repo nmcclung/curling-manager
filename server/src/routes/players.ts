@@ -61,6 +61,41 @@ playersRouter.post("/", async (req, res) => {
   }
 });
 
+const batchUpdateInput = z.object({
+  updates: z
+    .array(
+      z.object({
+        id: z.string().min(1),
+        patch: playerUpdateInput,
+      }),
+    )
+    .min(1),
+});
+
+// Registered before "/:id" — Express matches routes in registration order,
+// so "/batch" would otherwise be swallowed by the "/:id" param route.
+playersRouter.patch("/batch", async (req, res) => {
+  try {
+    const { updates } = batchUpdateInput.parse(req.body);
+
+    const existing = await prisma.player.findMany({ where: { id: { in: updates.map((u) => u.id) } } });
+    const existingById = new Map(existing.map((p) => [p.id, p]));
+
+    for (const { id, patch } of updates) {
+      const current = existingById.get(id);
+      if (!current) throw new HttpError(404, `Player ${id} not found`);
+      assertActivePlayerHasEligibility({ ...current, ...patch });
+    }
+
+    const players = await prisma.$transaction(
+      updates.map(({ id, patch }) => prisma.player.update({ where: { id }, data: patch })),
+    );
+    res.json(players);
+  } catch (err) {
+    handleError(err, res);
+  }
+});
+
 playersRouter.patch("/:id", async (req, res) => {
   try {
     const patch = playerUpdateInput.parse(req.body);

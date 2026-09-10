@@ -65,12 +65,25 @@ export function PrintSchedulePage() {
   const sortedTeams = [...teams].sort((a, b) => a.teamNumber - b.teamNumber);
 
   return (
-    <div className="mx-auto max-w-4xl bg-white p-8 text-neutral-900 print:p-0">
-      <style>{`@media print { @page { margin: 0.5in; } }`}</style>
+    <div className="mx-auto max-w-4xl bg-white p-8 text-neutral-900 print:max-w-none print:p-0 dark:bg-neutral-900 dark:text-neutral-100 dark:print:bg-white dark:print:text-neutral-900">
+      <style>{`
+        @media print {
+          /* Tightened spacing/type below (plus the compact team-card
+             layout) is what gets a full cycle (up to 16 teams + a 4-week
+             schedule) onto one portrait page. */
+          @page { size: portrait; margin: 0.5in; }
+          /* Browsers strip background colors from printed/PDF output by
+             default — without this, the team-group and sheet-header
+             color-coding (the whole point of this page) silently disappears
+             the moment you actually print, even though it looks fine
+             on-screen here first. */
+          * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+        }
+      `}</style>
 
       <div className="mb-6 flex flex-wrap items-center gap-3 print:hidden">
         <Button onClick={() => window.print()}>Print / Save as PDF</Button>
-        <label className="flex items-center gap-2 text-sm text-neutral-600">
+        <label className="flex items-center gap-2 text-sm text-neutral-600 dark:text-neutral-400">
           Week 1 date:
           <Input
             type="date"
@@ -81,30 +94,37 @@ export function PrintSchedulePage() {
           />
         </label>
         {scheduleData.matches.length === 0 && (
-          <span className="text-sm text-red-600">No schedule generated yet for this cycle.</span>
+          <span className="text-sm text-red-600 dark:text-red-400">No schedule generated yet for this cycle.</span>
         )}
       </div>
 
-      <h1 className="text-xl font-bold">
+      <h1 className="text-xl font-bold print:mb-0.5 print:text-lg">
         {cycle.season.name} — {cycle.league.name} Night — Cycle {cycle.cycleNumber}
       </h1>
-      <p className="mb-6 text-sm text-neutral-500">{cycle.teamCount} teams</p>
+      <p className="mb-6 text-sm text-neutral-500 print:mb-2 print:text-xs dark:text-neutral-400 dark:print:text-neutral-500">
+        {cycle.teamCount} teams
+      </p>
 
-      <section className="mb-8">
-        <h2 className="mb-2 text-base font-semibold">Teams</h2>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <section className="mb-8 print:mb-3">
+        <h2 className="mb-2 text-base font-semibold print:mb-1 print:text-sm">Teams</h2>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 print:grid-cols-3 print:gap-1.5">
           {sortedTeams.map((team) => (
             <div
               key={team.id}
-              className="break-inside-avoid rounded border border-neutral-300 p-2 text-sm"
+              className="break-inside-avoid rounded border border-neutral-300 p-2 text-sm print:p-1.5 print:text-[10px]"
               style={{ backgroundColor: GROUP_COLORS[team.groupIndex % GROUP_COLORS.length] }}
             >
-              <div className="mb-1 font-medium">Team {team.teamNumber}</div>
+              {/* Explicit dark text here, not inherited — this chip's
+                  background is always a light pastel regardless of the
+                  page's own light/dark theme, so it must never pick up the
+                  page's light-on-dark text color. */}
+              <div className="mb-1 font-medium text-neutral-900 print:mb-0.5">Team {team.teamNumber}</div>
               {(["SKIP", "VICE", "SECOND", "LEAD"] as Position[]).map((position) => {
                 const slot = team.slots.find((s) => s.position === position);
                 return (
-                  <div key={position} className="text-neutral-700">
-                    {POSITION_LABELS[position]}: {slot?.player?.name ?? "SPARE"}
+                  <div key={position} className="text-neutral-800">
+                    <span className="font-bold text-neutral-900">{POSITION_LABELS[position]}:</span>{" "}
+                    {slot?.player?.name ?? "SPARE"}
                   </div>
                 );
               })}
@@ -114,16 +134,20 @@ export function PrintSchedulePage() {
       </section>
 
       <section>
-        <h2 className="mb-2 text-base font-semibold">Schedule</h2>
-        <table className="w-full border-collapse text-sm">
+        <h2 className="mb-2 text-base font-semibold print:mb-1 print:text-sm">Schedule</h2>
+        <table className="w-full border-collapse text-sm print:text-[10px]">
           <thead>
             <tr>
-              <th className="border border-neutral-300 p-1.5 text-left">Week</th>
-              <th className="border border-neutral-300 p-1.5 text-left">Draw</th>
+              <th className="border border-neutral-300 p-1.5 text-left print:p-0.5 dark:border-neutral-700 dark:print:border-neutral-300">
+                Week
+              </th>
+              <th className="border border-neutral-300 p-1.5 text-left print:p-0.5 dark:border-neutral-700 dark:print:border-neutral-300">
+                Draw
+              </th>
               {sheetNumbers.map((sheet, i) => (
                 <th
                   key={sheet}
-                  className="border border-neutral-300 p-1.5 text-left font-semibold text-white"
+                  className="border border-neutral-300 p-1.5 text-left font-semibold text-white print:p-0.5"
                   style={{ backgroundColor: SHEET_COLORS[i % SHEET_COLORS.length] }}
                 >
                   Sheet {sheet}
@@ -159,7 +183,8 @@ function PrintWeekRows({
   sheetNumbers: number[];
   matches: Match[];
 }) {
-  const rowClass = shaded ? "bg-neutral-100" : "";
+  const rowClass = shaded ? "bg-neutral-100 dark:bg-neutral-800 dark:print:bg-neutral-100" : "";
+  const cellBorder = "border border-neutral-300 dark:border-neutral-700 dark:print:border-neutral-300";
   return (
     <>
       {(["EARLY", "LATE"] as DrawTime[]).map((drawTime, i) => {
@@ -167,15 +192,17 @@ function PrintWeekRows({
         return (
           <tr key={drawTime} className={`${rowClass} break-inside-avoid`}>
             {i === 0 && (
-              <td rowSpan={2} className="border border-neutral-300 p-1.5 align-top font-medium">
+              <td rowSpan={2} className={`${cellBorder} p-1.5 align-top font-medium print:p-0.5`}>
                 {label}
               </td>
             )}
-            <td className="border border-neutral-300 p-1.5 text-neutral-600">{drawTime === "EARLY" ? "6:45 PM" : "8:45 PM"}</td>
+            <td className={`${cellBorder} p-1.5 text-neutral-600 print:p-0.5 dark:text-neutral-400 dark:print:text-neutral-600`}>
+              {drawTime === "EARLY" ? "6:45 PM" : "8:45 PM"}
+            </td>
             {sheetNumbers.map((sheet) => {
               const match = bySheet.find((m) => m.sheetNumber === sheet);
               return (
-                <td key={sheet} className="border border-neutral-300 p-1.5">
+                <td key={sheet} className={`${cellBorder} p-1.5 print:p-0.5`}>
                   {!match ? null : match.isGhost ? (
                     <span className="text-neutral-400">open</span>
                   ) : (

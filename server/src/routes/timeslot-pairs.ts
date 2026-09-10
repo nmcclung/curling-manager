@@ -45,6 +45,9 @@ timeSlotPairsRouter.post("/", async (req, res) => {
     if (playerA.leagueId !== data.leagueId || playerB.leagueId !== data.leagueId) {
       throw new HttpError(400, "Both players must belong to the pair's league.");
     }
+    if (!playerA.active || !playerB.active) {
+      throw new HttpError(400, "Both players must be active to form a timeslot pair.");
+    }
 
     const pair = await prisma.timeSlotPair.create({
       data,

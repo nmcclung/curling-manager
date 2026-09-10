@@ -17,6 +17,10 @@ instead and keep this pointing at it.
 - `server/prisma/` — Prisma + SQLite (single file, `server/prisma/dev.db`, gitignored).
 - npm workspaces (single repo, two packages: `server`, `client`), not a monorepo tool.
 - No auth, no deployment target — runs on localhost only.
+- Dark mode: a toggle in the header (`client/src/lib/theme.ts`) flips a
+  `dark` class on `<html>`, persisted to `localStorage`, defaulting to the
+  OS preference. The `.dark` CSS variables were already in `index.css` from
+  initial shadcn setup — this just wires up the switch.
 
 ## Commands (run from repo root)
 
@@ -32,7 +36,15 @@ The app has three routed pages (`react-router-dom`, shell + nav in
 
 - **Roster** (`client/src/features/roster/`, `server/src/routes/players.ts` +
   `timeslot-pairs.ts`) — full `Player`/`TimeSlotPair` CRUD, two-league
-  tabbed UI. Built and working.
+  tabbed UI. Position eligibility, new-curler, and active status are all
+  inline checkboxes right in the table (no dialog needed for quick edits —
+  the dialog remains for name/notes and creating new players). Sortable by
+  name or status, defaulting to active-first. Deactivating a player who's
+  in a `TimeSlotPair` offers to remove the pair(s) too rather than leaving
+  them stale; existing stale pairs (an inactive member some other way) show
+  a warning inline. Pair creation validates both players are active,
+  client-side (the picker only lists active players) and server-side.
+  Built and working.
 - **Season/Cycle** (`server/src/routes/seasons.ts` + `cycles.ts`,
   `client/src/features/cycles/CyclePicker.tsx`) — create seasons and cycles
   (team count 12/14/16, cycle number auto-incremented per season+league).
@@ -126,10 +138,19 @@ The app has three routed pages (`react-router-dom`, shell + nav in
   unset), computed the same way the old system did (`startDate + 7*(N-1)
   days` per week). PDF export is just the browser's native
   print-to-PDF (a "Print / Export PDF" button calling `window.print()`) —
-  no PDF-generation dependency needed. The page always renders in fixed
-  light colors (not the theme-aware tokens the rest of the app uses), since
-  print output should look right on paper regardless of the viewer's
-  system theme.
+  no PDF-generation dependency needed. On-screen, the page follows the
+  app's dark mode toggle like everywhere else; the *printed/exported*
+  output always forces light colors regardless of that (`dark:print:`
+  overrides throughout), since paper/PDF output should look right
+  regardless of the viewer's screen theme when they made it. The
+  team-group color chips are a partial exception: their pastel backgrounds
+  are always the same literal hex values on-screen or off, so their own
+  text is pinned to a dark color rather than inheriting the page's
+  light/dark text color. Printing stays **portrait** (`@page { size:
+  portrait }`, tried landscape first — user found it left too much
+  whitespace) with tightened spacing/type sizes and a 3-column team grid
+  (bold position labels, one team per compact card), which is what gets a
+  full cycle (up to 16 teams + its 4-week schedule) onto a single page.
 
   **Color-coding matches the old system**: team roster cards are colored by
   `Team.groupIndex` (new API field, computed server-side via

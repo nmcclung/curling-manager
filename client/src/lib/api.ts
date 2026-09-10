@@ -135,6 +135,8 @@ export const api = {
     request<Player>("/api/players", { method: "POST", body: JSON.stringify(input) }),
   updatePlayer: (id: string, patch: Partial<PlayerInput>) =>
     request<Player>(`/api/players/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+  batchUpdatePlayers: (updates: { id: string; patch: Partial<PlayerInput> }[]) =>
+    request<Player[]>("/api/players/batch", { method: "PATCH", body: JSON.stringify({ updates }) }),
   deletePlayer: (id: string) => request<void>(`/api/players/${id}`, { method: "DELETE" }),
 
   getPairs: (leagueId: string) => request<TimeSlotPair[]>(`/api/timeslot-pairs?leagueId=${leagueId}`),

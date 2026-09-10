@@ -20,18 +20,20 @@ export function PairsSection({ league, players }: { league: League; players: Pla
       .catch((err) => setError(err instanceof Error ? err.message : String(err)));
   };
 
-  // Re-fetch whenever the player list changes too — a player delete cascades
-  // to their pairs server-side, and this list would otherwise go stale.
-  useEffect(load, [league.id, players]);
+  // Re-fetch only when the roster's active-player membership actually
+  // changes (not on every parent re-render, which creates a fresh
+  // `players` array reference on every edit elsewhere on the page).
+  const playerIdsKey = players.map((p) => p.id).join(",");
+  useEffect(load, [league.id, playerIdsKey]);
 
   const addPair = async () => {
     if (!playerAId || !playerBId) return;
     setError(null);
     try {
-      await api.createPair({ leagueId: league.id, playerAId, playerBId, priority: Number(priority) });
+      const created = await api.createPair({ leagueId: league.id, playerAId, playerBId, priority: Number(priority) });
+      setPairs((prev) => [created, ...(prev ?? [])]);
       setPlayerAId("");
       setPlayerBId("");
-      load();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -41,7 +43,7 @@ export function PairsSection({ league, players }: { league: League; players: Pla
     setError(null);
     try {
       await api.deletePair(id);
-      load();
+      setPairs((prev) => prev?.filter((p) => p.id !== id) ?? prev);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -97,24 +99,32 @@ export function PairsSection({ league, players }: { league: League; players: Pla
       </div>
 
       <ul className="divide-y">
-        {pairs?.map((pair) => (
-          <li key={pair.id} className="flex items-center justify-between py-2">
-            <span>
-              {pair.playerA.name} &harr; {pair.playerB.name}
-            </span>
-            <div className="flex items-center gap-2">
-              <Badge variant="secondary">{PRIORITY_LABELS[pair.priority] ?? pair.priority}</Badge>
-              <Button
-                variant="outline"
-                size="sm"
-                className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                onClick={() => removePair(pair.id)}
-              >
-                Remove
-              </Button>
-            </div>
-          </li>
-        ))}
+        {pairs?.map((pair) => {
+          const hasInactiveMember = !pair.playerA.active || !pair.playerB.active;
+          return (
+            <li key={pair.id} className="flex items-center justify-between py-2">
+              <span>
+                {pair.playerA.name} &harr; {pair.playerB.name}
+                {hasInactiveMember && (
+                  <span className="ml-2 text-destructive">
+                    ⚠ {!pair.playerA.active && !pair.playerB.active ? "both inactive" : "one player inactive"} — consider removing
+                  </span>
+                )}
+              </span>
+              <div className="flex items-center gap-2">
+                <Badge variant="secondary">{PRIORITY_LABELS[pair.priority] ?? pair.priority}</Badge>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                  onClick={() => removePair(pair.id)}
+                >
+                  Remove
+                </Button>
+              </div>
+            </li>
+          );
+        })}
         {pairs?.length === 0 && <li className="py-2 text-sm text-muted-foreground">No pairs yet.</li>}
       </ul>
     </div>
