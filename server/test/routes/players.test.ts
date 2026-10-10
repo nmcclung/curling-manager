@@ -101,13 +101,46 @@ describe("players routes", () => {
     expect(reloadedA.notes).toBeNull(); // the rolled-back player's patch never applied
   });
 
-  it("import always lands players inactive with no positions, even if the client sends otherwise", async () => {
+  it("import carries position eligibility, new-curler, and active status through as sent", async () => {
     const res = await request(app)
       .post("/api/players/import")
       .send({
         seasonId,
         leagueId,
-        players: [{ name: "Imported", notes: "from CSV", experienceYears: 5 }],
+        players: [
+          {
+            name: "Imported",
+            notes: "from CSV",
+            experienceYears: 5,
+            canPlaySkip: true,
+            canPlayVice: false,
+            canPlaySecond: false,
+            canPlayLead: false,
+            isNewCurler: true,
+            active: true,
+          },
+        ],
+      });
+
+    expect(res.status).toBe(201);
+    const [player] = res.body;
+    expect(player.active).toBe(true);
+    expect(player.canPlaySkip).toBe(true);
+    expect(player.canPlayVice).toBe(false);
+    expect(player.canPlaySecond).toBe(false);
+    expect(player.canPlayLead).toBe(false);
+    expect(player.isNewCurler).toBe(true);
+    expect(player.notes).toBe("from CSV");
+    expect(player.experienceYears).toBe(5);
+  });
+
+  it("import defaults position/new-curler/active to false when the client omits them", async () => {
+    const res = await request(app)
+      .post("/api/players/import")
+      .send({
+        seasonId,
+        leagueId,
+        players: [{ name: "Bare Minimum" }],
       });
 
     expect(res.status).toBe(201);
@@ -118,8 +151,24 @@ describe("players routes", () => {
     expect(player.canPlaySecond).toBe(false);
     expect(player.canPlayLead).toBe(false);
     expect(player.isNewCurler).toBe(false);
-    expect(player.notes).toBe("from CSV");
-    expect(player.experienceYears).toBe(5);
+  });
+
+  it("import rejects (and applies none of) a batch containing an active player with no position", async () => {
+    const res = await request(app)
+      .post("/api/players/import")
+      .send({
+        seasonId,
+        leagueId,
+        players: [
+          { name: "Valid Player", canPlaySkip: true, active: true },
+          { name: "Invalid Player", active: true }, // active, no position — should block the whole batch
+        ],
+      });
+
+    expect(res.status).toBe(400);
+
+    const check = await request(app).get(`/api/players?seasonId=${seasonId}&leagueId=${leagueId}`);
+    expect(check.body.find((p: { name: string }) => p.name === "Valid Player")).toBeUndefined();
   });
 
   it("last-cycle-positions returns empty when no cycle has generated teams yet", async () => {

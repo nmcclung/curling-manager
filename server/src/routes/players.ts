@@ -119,20 +119,34 @@ const importInput = z.object({
         name: z.string().trim().min(1, "Name is required"),
         notes: z.string().trim().max(2000).optional().nullable(),
         experienceYears: z.number().int().min(0).optional().nullable(),
+        canPlaySkip: z.boolean().default(false),
+        canPlayVice: z.boolean().default(false),
+        canPlaySecond: z.boolean().default(false),
+        canPlayLead: z.boolean().default(false),
+        isNewCurler: z.boolean().default(false),
+        active: z.boolean().default(false),
       }),
     )
     .min(1),
 });
 
-// Bulk-create from a roster CSV import (client-side review screen). Every
-// row lands inactive with no position eligibility set, regardless of what
-// the client sends — the registration export this feeds from has no
-// reliable signal for either (see CLAUDE.md's Roster import note), so a
-// human reviews and sets them deliberately per player afterward rather
-// than the importer guessing.
+// Bulk-create from a season-start roster CSV import (client-side review
+// screen). This source export carries real position-eligibility/new-curler/
+// active signal per row (see CLAUDE.md's Roster import note — an earlier,
+// column-poorer export this importer briefly supported had none, hence the
+// now-obsolete "always land inactive" behavior), so it's taken as-is rather
+// than forced off. Still enforces the same "active player needs >=1
+// position" invariant as every other player-write path, checked per row
+// before the transaction commits so one bad row doesn't partially apply.
 playersRouter.post("/import", async (req, res) => {
   try {
     const { leagueId, seasonId, players: rows } = importInput.parse(req.body);
+
+    for (const row of rows) {
+      if (row.active && !row.canPlaySkip && !row.canPlayVice && !row.canPlaySecond && !row.canPlayLead) {
+        throw new HttpError(400, `${row.name}: an active player must be eligible for at least one position.`);
+      }
+    }
 
     const created = await prisma.$transaction(
       rows.map((row) =>
@@ -143,12 +157,12 @@ playersRouter.post("/import", async (req, res) => {
             seasonId,
             notes: row.notes ?? null,
             experienceYears: row.experienceYears ?? null,
-            canPlaySkip: false,
-            canPlayVice: false,
-            canPlaySecond: false,
-            canPlayLead: false,
-            isNewCurler: false,
-            active: false,
+            canPlaySkip: row.canPlaySkip,
+            canPlayVice: row.canPlayVice,
+            canPlaySecond: row.canPlaySecond,
+            canPlayLead: row.canPlayLead,
+            isNewCurler: row.isNewCurler,
+            active: row.active,
           },
         }),
       ),

@@ -1,10 +1,70 @@
 import { useEffect, useState } from "react";
+import { ChevronsUpDownIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { api, type League, type Player, type TimeSlotPair } from "@/lib/api";
 
 const PRIORITY_LABELS: Record<number, string> = { 2: "High", 1: "Medium", 0: "Low" };
+
+// A searchable player picker — plain shadcn Select has no typeahead search,
+// which doesn't scale once a league's active roster gets into the dozens
+// (confirmed painful at 66 active players: a long scroll to find anyone
+// past "M"). Click to open, then type to filter by name.
+function PlayerCombobox({
+  players,
+  value,
+  onChange,
+  placeholder,
+}: {
+  players: Player[];
+  value: string;
+  onChange: (id: string) => void;
+  placeholder: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const selected = players.find((p) => p.id === value);
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          className="w-48 justify-between font-normal"
+        >
+          <span className={selected ? undefined : "text-muted-foreground"}>{selected?.name ?? placeholder}</span>
+          <ChevronsUpDownIcon className="ml-2 size-4 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-48 p-0">
+        <Command>
+          <CommandInput placeholder="Search players..." />
+          <CommandList>
+            <CommandEmpty>No player found.</CommandEmpty>
+            <CommandGroup>
+              {players.map((p) => (
+                <CommandItem
+                  key={p.id}
+                  value={p.name}
+                  onSelect={() => {
+                    onChange(p.id);
+                    setOpen(false);
+                  }}
+                >
+                  {p.name}
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 export function PairsSection({
   league,
@@ -73,30 +133,8 @@ export function PairsSection({
       {error && <p className="text-sm text-destructive">{error}</p>}
 
       <div className="flex flex-wrap items-center gap-2">
-        <Select value={playerAId} onValueChange={setPlayerAId}>
-          <SelectTrigger className="w-48">
-            <SelectValue placeholder="Player A" />
-          </SelectTrigger>
-          <SelectContent>
-            {players.map((p) => (
-              <SelectItem key={p.id} value={p.id}>
-                {p.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select value={playerBId} onValueChange={setPlayerBId}>
-          <SelectTrigger className="w-48">
-            <SelectValue placeholder="Player B" />
-          </SelectTrigger>
-          <SelectContent>
-            {players.map((p) => (
-              <SelectItem key={p.id} value={p.id}>
-                {p.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <PlayerCombobox players={players} value={playerAId} onChange={setPlayerAId} placeholder="Player A" />
+        <PlayerCombobox players={players} value={playerBId} onChange={setPlayerBId} placeholder="Player B" />
         <Select value={priority} onValueChange={setPriority}>
           <SelectTrigger className="w-32">
             <SelectValue />

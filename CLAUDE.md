@@ -84,12 +84,25 @@ The app has three routed pages (`react-router-dom`, shell + nav in
   `timeslot-pairs.ts`) — full `Player`/`TimeSlotPair` CRUD, two-league
   tabbed UI. Position eligibility, new-curler, and active status are all
   inline checkboxes right in the table (no dialog needed for quick edits —
-  the dialog remains for name/notes and creating new players). Sortable by
-  name or status, defaulting to active-first. Deactivating a player who's
-  in a `TimeSlotPair` offers to remove the pair(s) too rather than leaving
-  them stale; existing stale pairs (an inactive member some other way) show
-  a warning inline. Pair creation validates both players are active,
-  client-side (the picker only lists active players) and server-side.
+  the dialog remains for name/notes and creating new players). Every column
+  is independently sortable (name, active status, each position,
+  experience, new-curler), defaulting to active-first. A position column's
+  "descending" isn't a plain boolean sort — it ranks specialists for that
+  position (eligible there and few/no other positions) above more versatile
+  eligible players, which are above everyone ineligible; "ascending"
+  reverses it. The summary line above the table (active count, skip-eligible
+  count) also breaks out specialist counts per position (eligible for
+  *exactly* that one position — the number the oversupply gate actually
+  cares about, see below) plus a new-curler count, all active-player-scoped.
+  Deactivating a player who's in a `TimeSlotPair` offers to remove the
+  pair(s) too rather than leaving them stale; existing stale pairs (an
+  inactive member some other way) show a warning inline. Pair creation
+  validates both players are active, client-side (the picker only lists
+  active players) and server-side. The pair-creation player pickers are a
+  searchable combobox (shadcn `command`/`popover`, click to open then type
+  to filter by name) rather than a plain dropdown — confirmed necessary at
+  real-roster scale (66 active players was an unusable scroll in a plain
+  `<Select>`, which has no typeahead search).
   Once a player has ever been assigned to a `TeamSlot`, deleting them is
   blocked server-side (`DELETE /api/players/:id`, guarded by a
   `hasTeamHistory` flag computed on `GET /api/players`) — only
@@ -104,32 +117,35 @@ The app has three routed pages (`react-router-dom`, shell + nav in
   never assigned to any team still deletes freely. Built and working.
 
   **Roster import** (`client/src/features/roster/ImportRosterDialog.tsx`,
-  `client/src/lib/csv.ts`, `POST /api/players/import`) — brings in an
-  initial roster from the club's registration-tool CSV export (a
-  "League Registration Report", not our own internal format: First
-  Name/Last Name/Experience/Member Since/Notes for League Manager, with a
-  few report-header lines before the real CSV header — the header row is
-  located by content, not a fixed line offset, since that framing text
-  isn't guaranteed stable). Upload → editable preview table (rows matching
-  an existing player's name by case-insensitive exact match are flagged
-  "possible duplicate" and left unchecked, everything else checked by
-  default) → explicit "Import N" commit, so nothing hits the DB before a
-  human reviews it. Deliberately narrow about what it imports: name,
-  `experienceYears` (a new nullable `Player` field — years curling, from
-  the export's "Experience" column, shown/editable as its own roster-table
-  column now), and the raw "Notes for League Manager" text verbatim. It
-  does **not** infer `isNewCurler` or any position eligibility — this data
-  doesn't reliably distinguish "new to curling" from "new to this club,"
-  and there's no position-eligibility signal at all (occasional prose
-  mentions like "Vice or Second please!" aren't parsed). Every imported
-  player lands `active: false` with all four positions `false`
-  (server-enforced regardless of what the client sends), satisfying the
-  "active player needs ≥1 position" invariant automatically and leaving a
-  clear manual-review queue rather than guessing. Same reasoning killed
-  auto-detecting `TimeSlotPair` candidates from notes text (several rows
-  do reference another player by name, e.g. "I need to be on the same
-  draw as Wayne Lewchuk") — the raw note just imports as-is on that
-  player's `notes` field for a human to read and act on.
+  `client/src/lib/csv.ts`, `POST /api/players/import`) — brings in a
+  season's starting roster from the club's season-start CSV export: First
+  Name, Last Name, Experience, Notes for League Manager, Can Play
+  Skip?/Vice?/Second?/Lead?, New Curler?, Active?, Our notes. Header is
+  located by content (`"first name"`/`"last name"` present in a row), not
+  assumed to be row 1, in case a future export reintroduces report-preamble
+  lines. Upload → editable preview table (rows matching an existing
+  player's name by case-insensitive exact match are flagged "possible
+  duplicate" and left unchecked, everything else checked by default,
+  position/new-curler/active shown as checkboxes and editable inline same
+  as the main roster table) → explicit "Import N" commit, so nothing hits
+  the DB before a human reviews it. Imports name, `experienceYears`
+  (nullable `Player` field, from the export's "Experience" column),
+  `notes` from "Notes for League Manager" only (the export's separate "Our
+  notes" column is the club's own internal bookkeeping and is deliberately
+  **not** imported — confirmed with the user), and — unlike an earlier,
+  column-poorer "League Registration Report" export this importer briefly
+  supported, which had no position-eligibility signal at all — this export
+  carries real `canPlaySkip`/`canPlayVice`/`canPlaySecond`/`canPlayLead`,
+  `isNewCurler`, and `active` data directly, so those come in as-is rather
+  than being forced off. The "active player needs ≥1 position" invariant
+  is still enforced, both client-side before submit (blocks with the
+  offending names listed) and server-side per row before the create
+  transaction commits (one bad row rejects the whole batch rather than
+  partially importing). `TimeSlotPair` candidates are still **not**
+  auto-detected from notes text, even though rows do reference another
+  player by name (e.g. "Pair with [name] please") — the raw note just
+  imports as-is on that player's `notes` field for a human to read and act
+  on by creating the pair manually.
 - **Season/Cycle** (`server/src/routes/seasons.ts` + `cycles.ts`,
   `client/src/features/cycles/CyclePicker.tsx`) — create seasons and cycles
   (team count 12/14/16, cycle number auto-incremented per season+league).

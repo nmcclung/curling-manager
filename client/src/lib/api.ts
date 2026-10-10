@@ -154,7 +154,17 @@ export const api = {
   importPlayers: (
     seasonId: string,
     leagueId: string,
-    players: { name: string; notes?: string | null; experienceYears?: number | null }[],
+    players: {
+      name: string;
+      notes?: string | null;
+      experienceYears?: number | null;
+      canPlaySkip?: boolean;
+      canPlayVice?: boolean;
+      canPlaySecond?: boolean;
+      canPlayLead?: boolean;
+      isNewCurler?: boolean;
+      active?: boolean;
+    }[],
   ) =>
     request<Player[]>("/api/players/import", {
       method: "POST",

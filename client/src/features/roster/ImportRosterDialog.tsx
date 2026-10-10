@@ -15,6 +15,13 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { api, type League, type Player } from "@/lib/api";
 import { parseRegistrationCsv, type RegistrationRow } from "@/lib/csv";
 
+const POSITION_FIELDS: { key: keyof RegistrationRow; label: string }[] = [
+  { key: "canPlaySkip", label: "Skip" },
+  { key: "canPlayVice", label: "Vice" },
+  { key: "canPlaySecond", label: "Second" },
+  { key: "canPlayLead", label: "Lead" },
+];
+
 type ImportRow = RegistrationRow & {
   include: boolean;
   duplicate: boolean;
@@ -81,13 +88,39 @@ export function ImportRosterDialog({
     if (!rows) return;
     const toImport = rows.filter((r) => r.include);
     if (toImport.length === 0) return;
+
+    // Same invariant the server enforces (and every other player-write path
+    // in the app) — catch it here with names attached so the person doesn't
+    // have to decode a generic 400 back to a row in a 144-row table.
+    const invalid = toImport.filter(
+      (r) => r.active && !r.canPlaySkip && !r.canPlayVice && !r.canPlaySecond && !r.canPlayLead,
+    );
+    if (invalid.length > 0) {
+      setError(
+        `These active players have no position checked — check a position or uncheck Active before importing: ${invalid
+          .map((r) => r.name)
+          .join(", ")}`,
+      );
+      return;
+    }
+
     setError(null);
     setImporting(true);
     try {
       const created = await api.importPlayers(
         seasonId,
         league.id,
-        toImport.map((r) => ({ name: r.name, notes: r.notes, experienceYears: r.experienceYears })),
+        toImport.map((r) => ({
+          name: r.name,
+          notes: r.notes,
+          experienceYears: r.experienceYears,
+          canPlaySkip: r.canPlaySkip,
+          canPlayVice: r.canPlayVice,
+          canPlaySecond: r.canPlaySecond,
+          canPlayLead: r.canPlayLead,
+          isNewCurler: r.isNewCurler,
+          active: r.active,
+        })),
       );
       onImported(created);
       handleClose(false);
@@ -100,14 +133,13 @@ export function ImportRosterDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="flex max-h-[85vh] max-w-3xl flex-col overflow-hidden">
+      <DialogContent className="flex max-h-[85vh] w-[95vw] max-w-6xl flex-col overflow-hidden sm:max-w-6xl">
         <DialogHeader>
           <DialogTitle>Import Roster — {league.name}</DialogTitle>
           <DialogDescription>
-            Upload a League Registration Report CSV export. Imported players land inactive with no
-            position eligibility or new-curler status set — this data doesn't tell us either
-            reliably, so review and fill those in on the roster afterward. Only name, notes, and
-            years of experience come in automatically.
+            Upload the season-start roster CSV export. Name, experience, notes, position
+            eligibility, new-curler status, and active status all come in directly from the file
+            — review and adjust anything below before importing.
           </DialogDescription>
         </DialogHeader>
 
@@ -146,7 +178,14 @@ export function ImportRosterDialog({
                   <TableRow>
                     <TableHead className="w-10 text-center">Import</TableHead>
                     <TableHead>Name</TableHead>
+                    {POSITION_FIELDS.map((f) => (
+                      <TableHead key={f.key} className="text-center">
+                        {f.label}
+                      </TableHead>
+                    ))}
                     <TableHead className="w-24 text-center">Experience</TableHead>
+                    <TableHead className="text-center">New Curler</TableHead>
+                    <TableHead className="text-center">Active</TableHead>
                     <TableHead>Notes</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -167,6 +206,14 @@ export function ImportRosterDialog({
                           </Badge>
                         )}
                       </TableCell>
+                      {POSITION_FIELDS.map((f) => (
+                        <TableCell key={f.key} className="text-center">
+                          <Checkbox
+                            checked={row[f.key] as boolean}
+                            onCheckedChange={(checked) => updateRow(i, { [f.key]: !!checked })}
+                          />
+                        </TableCell>
+                      ))}
                       <TableCell className="text-center">
                         <Input
                           type="text"
@@ -179,6 +226,18 @@ export function ImportRosterDialog({
                             }
                           }}
                           className="h-8 w-20"
+                        />
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <Checkbox
+                          checked={row.isNewCurler}
+                          onCheckedChange={(checked) => updateRow(i, { isNewCurler: !!checked })}
+                        />
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <Checkbox
+                          checked={row.active}
+                          onCheckedChange={(checked) => updateRow(i, { active: !!checked })}
                         />
                       </TableCell>
                       <TableCell>

@@ -20,7 +20,47 @@ const POSITION_FIELDS: { key: keyof PlayerInput; label: string }[] = [
 
 const POSITION_LABELS: Record<Position, string> = { SKIP: "Skip", VICE: "Vice", SECOND: "Second", LEAD: "Lead" };
 
-type SortMode = "status-asc" | "status-desc" | "name-asc" | "name-desc";
+type PositionKey = "canPlaySkip" | "canPlayVice" | "canPlaySecond" | "canPlayLead";
+type SortKey = "name" | "status" | "experienceYears" | "isNewCurler" | PositionKey;
+type SortDirection = "asc" | "desc";
+type SortState = { key: SortKey; direction: SortDirection };
+
+// Direction a column starts at the first time it's clicked (switching from
+// some other column) — picked per-column for what's most useful to see
+// first, not just defaulting everything to ascending.
+const DEFAULT_DIRECTION: Record<SortKey, SortDirection> = {
+  name: "asc",
+  status: "asc",
+  experienceYears: "desc",
+  isNewCurler: "desc",
+  canPlaySkip: "desc",
+  canPlayVice: "desc",
+  canPlaySecond: "desc",
+  canPlayLead: "desc",
+};
+
+function eligibilityCount(p: Player): number {
+  return Number(p.canPlaySkip) + Number(p.canPlayVice) + Number(p.canPlaySecond) + Number(p.canPlayLead);
+}
+
+// Sorting a position column isn't a plain boolean sort — "descending" means
+// specialists for that position first (eligible here and few/no other
+// positions), then more versatile eligible players, then everyone
+// ineligible. "Ascending" reverses that: ineligible first, then eligible
+// ordered from most versatile down to specialist.
+function comparePosition(a: Player, b: Player, key: PositionKey, direction: SortDirection): number {
+  const aEligible = a[key];
+  const bEligible = b[key];
+  if (aEligible !== bEligible) {
+    const eligibleFirst = direction === "desc";
+    return aEligible === eligibleFirst ? -1 : 1;
+  }
+  if (aEligible) {
+    const diff = eligibilityCount(a) - eligibilityCount(b); // fewer total positions = more specialized
+    if (diff !== 0) return direction === "desc" ? diff : -diff;
+  }
+  return a.name.localeCompare(b.name);
+}
 
 function EditableNotesCell({ notes, onSave }: { notes: string | null; onSave: (notes: string | null) => void }) {
   const [editing, setEditing] = useState(false);
@@ -66,16 +106,38 @@ function EditableNotesCell({ notes, onSave }: { notes: string | null; onSave: (n
   );
 }
 
-function compare(a: Player, b: Player, mode: SortMode): number {
-  switch (mode) {
-    case "name-asc":
+function compare(a: Player, b: Player, sort: SortState): number {
+  switch (sort.key) {
+    case "name":
+      return sort.direction === "asc" ? a.name.localeCompare(b.name) : b.name.localeCompare(a.name);
+    case "status": {
+      if (a.active === b.active) return a.name.localeCompare(b.name);
+      const activeFirst = sort.direction === "asc";
+      return a.active === activeFirst ? -1 : 1;
+    }
+    case "experienceYears": {
+      // Unknown experience (null) always sorts last, regardless of direction
+      // — it shouldn't be conflated with "0 years" at either end.
+      if (a.experienceYears == null && b.experienceYears == null) return a.name.localeCompare(b.name);
+      if (a.experienceYears == null) return 1;
+      if (b.experienceYears == null) return -1;
+      if (a.experienceYears !== b.experienceYears) {
+        return sort.direction === "asc"
+          ? a.experienceYears - b.experienceYears
+          : b.experienceYears - a.experienceYears;
+      }
       return a.name.localeCompare(b.name);
-    case "name-desc":
-      return b.name.localeCompare(a.name);
-    case "status-asc":
-      return a.active !== b.active ? (a.active ? -1 : 1) : a.name.localeCompare(b.name);
-    case "status-desc":
-      return a.active !== b.active ? (a.active ? 1 : -1) : a.name.localeCompare(b.name);
+    }
+    case "isNewCurler": {
+      if (a.isNewCurler === b.isNewCurler) return a.name.localeCompare(b.name);
+      const newCurlerFirst = sort.direction === "desc";
+      return a.isNewCurler === newCurlerFirst ? -1 : 1;
+    }
+    case "canPlaySkip":
+    case "canPlayVice":
+    case "canPlaySecond":
+    case "canPlayLead":
+      return comparePosition(a, b, sort.key, sort.direction);
   }
 }
 
@@ -169,7 +231,7 @@ function LeagueRoster({
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [editingPlayer, setEditingPlayer] = useState<Player | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
-  const [sortMode, setSortMode] = useState<SortMode>("status-asc");
+  const [sortMode, setSortMode] = useState<SortState>({ key: "status", direction: "asc" });
 
   const loadPlayers = () => {
     api
@@ -317,22 +379,33 @@ function LeagueRoster({
 
   const discardChanges = () => setPendingChanges({});
 
-  const toggleNameSort = () => setSortMode((m) => (m === "name-asc" ? "name-desc" : "name-asc"));
-  const toggleStatusSort = () => setSortMode((m) => (m === "status-asc" ? "status-desc" : "status-asc"));
-  const sortArrow = (asc: SortMode, desc: SortMode) => (sortMode === asc ? "▲" : sortMode === desc ? "▼" : "");
+  const toggleSort = (key: SortKey) =>
+    setSortMode((prev) =>
+      prev.key === key ? { key, direction: prev.direction === "asc" ? "desc" : "asc" } : { key, direction: DEFAULT_DIRECTION[key] },
+    );
+  const sortArrow = (key: SortKey) => (sortMode.key === key ? (sortMode.direction === "asc" ? "▲" : "▼") : "");
 
   const effectivePlayers = players?.map((p) => (pendingChanges[p.id] ? { ...p, ...pendingChanges[p.id] } : p)) ?? null;
   const sortedPlayers = effectivePlayers ? [...effectivePlayers].sort((a, b) => compare(a, b, sortMode)) : null;
   const activePlayers = effectivePlayers?.filter((p) => p.active) ?? [];
   const activeCount = activePlayers.length;
   const skipCount = activePlayers.filter((p) => p.canPlaySkip).length;
+  // "Specialist" = eligible for exactly this one position — the number that
+  // actually matters for the oversupply gate (validateRosterForGeneration):
+  // specialists for a position compete only against each other for that
+  // position's teamCount slots, with no fallback if they miss out.
+  const specialistCount = (key: PositionKey) => activePlayers.filter((p) => p[key] && eligibilityCount(p) === 1).length;
+  const newCurlerCount = activePlayers.filter((p) => p.isNewCurler).length;
   const dirtyCount = Object.keys(pendingChanges).length;
 
   return (
     <div className="space-y-4 py-4">
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">
-          {activeCount} active player{activeCount === 1 ? "" : "s"} &middot; {skipCount} skip-eligible
+          {activeCount} active player{activeCount === 1 ? "" : "s"} &middot; {skipCount} skip-eligible (
+          {specialistCount("canPlaySkip")} skip-only) &middot; {specialistCount("canPlayVice")} vice-only &middot;{" "}
+          {specialistCount("canPlaySecond")} second-only &middot; {specialistCount("canPlayLead")} lead-only &middot;{" "}
+          {newCurlerCount} new curler{newCurlerCount === 1 ? "" : "s"}
         </p>
         <div className="flex items-center gap-2">
           {dirtyCount > 0 && (
@@ -361,18 +434,29 @@ function LeagueRoster({
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="cursor-pointer select-none" onClick={toggleNameSort}>
-                Name {sortArrow("name-asc", "name-desc")}
+              <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("name")}>
+                Name {sortArrow("name")}
               </TableHead>
               {POSITION_FIELDS.map((f) => (
-                <TableHead key={f.key} className="text-center">
-                  {f.label}
+                <TableHead
+                  key={f.key}
+                  className="cursor-pointer select-none text-center"
+                  onClick={() => toggleSort(f.key as PositionKey)}
+                >
+                  {f.label} {sortArrow(f.key as PositionKey)}
                 </TableHead>
               ))}
-              <TableHead className="w-24 text-center">Experience</TableHead>
-              <TableHead className="text-center">New Curler</TableHead>
-              <TableHead className="cursor-pointer select-none text-center" onClick={toggleStatusSort}>
-                Active {sortArrow("status-asc", "status-desc")}
+              <TableHead
+                className="w-24 cursor-pointer select-none text-center"
+                onClick={() => toggleSort("experienceYears")}
+              >
+                Experience {sortArrow("experienceYears")}
+              </TableHead>
+              <TableHead className="cursor-pointer select-none text-center" onClick={() => toggleSort("isNewCurler")}>
+                New Curler {sortArrow("isNewCurler")}
+              </TableHead>
+              <TableHead className="cursor-pointer select-none text-center" onClick={() => toggleSort("status")}>
+                Active {sortArrow("status")}
               </TableHead>
               <TableHead className="text-center">
                 Last Cycle

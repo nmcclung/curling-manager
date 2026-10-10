@@ -46,13 +46,24 @@ export type RegistrationRow = {
   name: string;
   experienceYears: number | null;
   notes: string | null;
+  canPlaySkip: boolean;
+  canPlayVice: boolean;
+  canPlaySecond: boolean;
+  canPlayLead: boolean;
+  isNewCurler: boolean;
+  active: boolean;
 };
 
-// The registration tool's export leads with a few report-header lines
-// (club name, report title, "Printed on ...", a blank line) before the
-// actual CSV header — so we locate the header row by content ("First
-// Name"/"Last Name" columns) rather than assuming a fixed line count,
-// since that framing text isn't guaranteed stable across reports.
+// The club's season-start roster export: First Name, Last Name, Experience,
+// Notes for League Manager, Can Play Skip?/Vice?/Second?/Lead?, New Curler?,
+// Active?, Our notes (that last column is the club's own internal
+// bookkeeping and deliberately not imported — confirmed with the user).
+// Unlike an earlier mid-season "League Registration Report" export this
+// importer briefly supported, this one carries real position-eligibility,
+// new-curler, and active signal directly, so it's taken as-is rather than
+// forced to a manual-review default. Header is located by content ("First
+// Name"/"Last Name" columns) rather than assumed to be row 1, in case a
+// future export reintroduces report-preamble lines.
 export function parseRegistrationCsv(text: string): RegistrationRow[] {
   const rows = parseCsv(text);
   const headerIndex = rows.findIndex((row) => {
@@ -63,11 +74,20 @@ export function parseRegistrationCsv(text: string): RegistrationRow[] {
     throw new Error('Could not find a header row with "First Name" / "Last Name" columns in this file.');
   }
 
-  const header = rows[headerIndex].map((c) => c.trim());
-  const firstNameIdx = header.findIndex((c) => c.toLowerCase() === "first name");
-  const lastNameIdx = header.findIndex((c) => c.toLowerCase() === "last name");
-  const experienceIdx = header.findIndex((c) => c.toLowerCase() === "experience");
-  const notesIdx = header.findIndex((c) => c.toLowerCase() === "notes for league manager");
+  const header = rows[headerIndex].map((c) => c.trim().toLowerCase());
+  const colIdx = (label: string) => header.findIndex((c) => c === label);
+  const firstNameIdx = colIdx("first name");
+  const lastNameIdx = colIdx("last name");
+  const experienceIdx = colIdx("experience");
+  const notesIdx = colIdx("notes for league manager");
+  const skipIdx = colIdx("can play skip?");
+  const viceIdx = colIdx("can play vice?");
+  const secondIdx = colIdx("can play second?");
+  const leadIdx = colIdx("can play lead?");
+  const newCurlerIdx = colIdx("new curler?");
+  const activeIdx = colIdx("active?");
+
+  const parseBool = (v: string | undefined) => (v ?? "").trim().toLowerCase() === "true";
 
   const result: RegistrationRow[] = [];
   for (const row of rows.slice(headerIndex + 1)) {
@@ -82,7 +102,17 @@ export function parseRegistrationCsv(text: string): RegistrationRow[] {
     const rawNotes = notesIdx >= 0 ? row[notesIdx]?.trim() : "";
     const notes = rawNotes || null;
 
-    result.push({ name, experienceYears, notes });
+    result.push({
+      name,
+      experienceYears,
+      notes,
+      canPlaySkip: parseBool(row[skipIdx]),
+      canPlayVice: parseBool(row[viceIdx]),
+      canPlaySecond: parseBool(row[secondIdx]),
+      canPlayLead: parseBool(row[leadIdx]),
+      isNewCurler: parseBool(row[newCurlerIdx]),
+      active: activeIdx >= 0 ? parseBool(row[activeIdx]) : false,
+    });
   }
   return result;
 }
