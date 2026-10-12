@@ -37,12 +37,24 @@ a direct swap between two teams' same-position players.
 
 ### Schedule Creation
 
-Maps a cycle's generated teams onto a fixed weekly matchup schedule (no
-repeat opponents within a cycle, sheet rotation, ghost games balanced
-onto less-preferred sheets) and renders a printable weekly schedule plus
-team roster sheet, exportable to PDF straight from the browser's print
-dialog. Editing a cycle's teams after its schedule exists flags the
-schedule stale until it's regenerated or marked reviewed.
+Maps a cycle's generated teams onto a fixed weekly matchup schedule and
+renders a printable weekly schedule plus team roster sheet, exportable to
+PDF straight from the browser's print dialog. Editing a cycle's teams
+after its schedule exists flags the schedule stale until it's
+regenerated or marked reviewed.
+
+The matchup schedule is built once per team count (12/14/16) and reused
+across every cycle. It's held to a set of requirements, some non-
+negotiable and some best-effort:
+
+| Requirement | Type | Result |
+|---|---|---|
+| No team plays the same opponent twice in a cycle | Hard | Always |
+| A timeslot pair's two players always draw at the same time each week | Hard | Always |
+| Every team gets exactly 2 early / 2 late draws per cycle | Hard | Always |
+| No team plays the same sheet 3+ times in a cycle | Soft | Worst case 2x |
+| Ghost ("open") games avoid the preferred middle sheets | Soft | 100% currently |
+| Real teams rotate through as many distinct sheets as possible | Soft (tiebreak) | Varies by team count |
 
 ## Tech Stack
 
