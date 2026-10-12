@@ -107,7 +107,12 @@ export function PrintSchedulePage() {
 
       <section className="mb-8 print:mb-3">
         <h2 className="mb-2 text-base font-semibold print:mb-1 print:text-sm">Teams</h2>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 print:grid-cols-3 print:gap-1.5">
+        {/* Same column count on screen and print — this page's whole point
+            is previewing what you'll actually get, so a different on-screen
+            column count than print would silently reshuffle the team-group
+            color blocks the moment you print, which is confusing since
+            nothing else about the layout visibly changes to warn you. */}
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 print:gap-1.5">
           {sortedTeams.map((team) => (
             <div
               key={team.id}
@@ -118,16 +123,18 @@ export function PrintSchedulePage() {
                   background is always a light pastel regardless of the
                   page's own light/dark theme, so it must never pick up the
                   page's light-on-dark text color. */}
-              <div className="mb-1 font-medium text-neutral-900 print:mb-0.5">Team {team.teamNumber}</div>
-              {(["SKIP", "VICE", "SECOND", "LEAD"] as Position[]).map((position) => {
-                const slot = team.slots.find((s) => s.position === position);
-                return (
-                  <div key={position} className="text-neutral-800">
-                    <span className="font-bold text-neutral-900">{POSITION_LABELS[position]}:</span>{" "}
-                    {slot?.player?.name ?? "SPARE"}
-                  </div>
-                );
-              })}
+              <div className="mb-1 font-medium text-neutral-900 underline print:mb-0.5">Team {team.teamNumber}</div>
+              <div className="space-y-1 print:space-y-0.5">
+                {(["SKIP", "VICE", "SECOND", "LEAD"] as Position[]).map((position) => {
+                  const slot = team.slots.find((s) => s.position === position);
+                  return (
+                    <div key={position} className="text-neutral-800">
+                      <span className="font-bold text-neutral-900">{POSITION_LABELS[position]}:</span>{" "}
+                      {slot?.player?.name ?? "SPARE"}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           ))}
         </div>
@@ -135,11 +142,17 @@ export function PrintSchedulePage() {
 
       <section>
         <h2 className="mb-2 text-base font-semibold print:mb-1 print:text-sm">Schedule</h2>
-        <table className="w-full border-collapse text-sm print:text-[10px]">
+        {/* border-separate + border-spacing-0, not border-collapse — Chrome
+            has a long-standing print/PDF bug where a collapsed table's row
+            borders randomly vanish for some rows but not others (confirmed:
+            only the first week's horizontal line survived printing here,
+            even though every row looked identical on-screen). Each cell
+            drawing its own border independently sidesteps the bug entirely. */}
+        <table className="w-full border-separate border-spacing-0 text-sm print:text-[10px]">
           <thead>
             <tr>
               <th className="border border-neutral-300 p-1.5 text-left print:p-0.5 dark:border-neutral-700 dark:print:border-neutral-300">
-                Week
+                Date
               </th>
               <th className="border border-neutral-300 p-1.5 text-left print:p-0.5 dark:border-neutral-700 dark:print:border-neutral-300">
                 Draw
