@@ -15,10 +15,10 @@ weeknight leagues, in practice) season after season.
 
 Each season starts with an empty roster per league. Players carry name,
 position eligibility (Skip/Vice/Second/Lead), new-curler status, active
-status, years of experience, and notes — all editable inline in a
+status, years of experience, and notes - all editable inline in a
 sortable table. A CSV importer brings in a season's starting roster in
 bulk from the club's registration export. Players who want to curl in the
-same time slot each week can be linked as a "timeslot pair." Once a
+same time slot each week can be linked as a "timeslot pair." After a
 player has ever been assigned to a team, they can no longer be deleted
 (only deactivated), to keep history intact.
 
@@ -27,13 +27,13 @@ player has ever been assigned to a team, they can no longer be deleted
 Generates a cycle's teams from the active roster: timeslot pairs are
 placed together first, then players are drafted in priority order (skip
 specialists, new-curler leads, etc.), redistributed to balance teams, and
-any remaining slots are filled with a SPARE placeholder — except Skip,
-which can never be a SPARE. From the second cycle of a season onward,
-generation also weighs each season's accumulated teammate history to
-avoid repeat teammates, with hundreds of randomized attempts kept the
-best-scoring one. Generated teams are fully editable afterward, including
-a direct swap between two teams' same-position players — the only way to
-move a Skip between teams, since Skip can't pass through an empty slot.
+any remaining slots are filled with a SPARE placeholder except Skip,
+which can never be a SPARE. 
+
+From the second cycle of a season onward, generation also weighs each season's accumulated teammate history to
+avoid repeat teammates, with hundreds of randomized attempts and keeping the
+best-scoring one. Generated teams are fully editable afterwards, including
+a direct swap between two teams' same-position players.
 
 ### Schedule Creation
 
