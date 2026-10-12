@@ -116,4 +116,63 @@ describe("team generation", () => {
     const deleteUnassignedRes = await request(app).delete(`/api/players/${freshPlayer.id}`);
     expect(deleteUnassignedRes.status).toBe(204);
   });
+
+  it("swap exchanges two same-position slots' occupants atomically, including Skip", async () => {
+    await seedRoster(seasonId, leagueId);
+    const cycleRes = await request(app).post("/api/cycles").send({ seasonId, leagueId, teamCount: 12 });
+    await request(app).post(`/api/cycles/${cycleRes.body.id}/teams/generate`).send({});
+
+    const teamsRes = await request(app).get(`/api/cycles/${cycleRes.body.id}/teams`);
+    const [teamA, teamB] = teamsRes.body;
+    const slotA = teamA.slots.find((s: { position: string }) => s.position === "SKIP");
+    const slotB = teamB.slots.find((s: { position: string }) => s.position === "SKIP");
+    const [playerAId, playerBId] = [slotA.playerId, slotB.playerId];
+    expect(playerAId).not.toBe(playerBId);
+
+    const swapRes = await request(app)
+      .post(`/api/team-slots/${slotA.id}/swap`)
+      .send({ otherSlotId: slotB.id });
+    expect(swapRes.status).toBe(200);
+
+    const after = await request(app).get(`/api/cycles/${cycleRes.body.id}/teams`);
+    const afterA = after.body.find((t: { id: string }) => t.id === teamA.id);
+    const afterB = after.body.find((t: { id: string }) => t.id === teamB.id);
+    expect(afterA.slots.find((s: { position: string }) => s.position === "SKIP").playerId).toBe(playerBId);
+    expect(afterB.slots.find((s: { position: string }) => s.position === "SKIP").playerId).toBe(playerAId);
+
+    // Flagged the schedule stale, same as a plain manual override would.
+    await request(app).post(`/api/cycles/${cycleRes.body.id}/schedule/generate`).send({});
+    const scheduleBefore = await request(app).get(`/api/cycles/${cycleRes.body.id}/schedule`);
+    expect(scheduleBefore.body.schedule.isStale).toBe(false);
+    const slotC = afterA.slots.find((s: { position: string }) => s.position === "VICE");
+    const slotD = afterB.slots.find((s: { position: string }) => s.position === "VICE");
+    await request(app).post(`/api/team-slots/${slotC.id}/swap`).send({ otherSlotId: slotD.id });
+    const scheduleAfter = await request(app).get(`/api/cycles/${cycleRes.body.id}/schedule`);
+    expect(scheduleAfter.body.schedule.isStale).toBe(true);
+  });
+
+  it("swap rejects slots of different positions", async () => {
+    await seedRoster(seasonId, leagueId);
+    const cycleRes = await request(app).post("/api/cycles").send({ seasonId, leagueId, teamCount: 12 });
+    await request(app).post(`/api/cycles/${cycleRes.body.id}/teams/generate`).send({});
+
+    const teamsRes = await request(app).get(`/api/cycles/${cycleRes.body.id}/teams`);
+    const skipSlot = teamsRes.body[0].slots.find((s: { position: string }) => s.position === "SKIP");
+    const viceSlot = teamsRes.body[1].slots.find((s: { position: string }) => s.position === "VICE");
+
+    const res = await request(app).post(`/api/team-slots/${skipSlot.id}/swap`).send({ otherSlotId: viceSlot.id });
+    expect(res.status).toBe(400);
+  });
+
+  it("swap rejects two slots on the same team", async () => {
+    await seedRoster(seasonId, leagueId);
+    const cycleRes = await request(app).post("/api/cycles").send({ seasonId, leagueId, teamCount: 12 });
+    await request(app).post(`/api/cycles/${cycleRes.body.id}/teams/generate`).send({});
+
+    const teamsRes = await request(app).get(`/api/cycles/${cycleRes.body.id}/teams`);
+    const skipSlot = teamsRes.body[0].slots.find((s: { position: string }) => s.position === "SKIP");
+
+    const res = await request(app).post(`/api/team-slots/${skipSlot.id}/swap`).send({ otherSlotId: skipSlot.id });
+    expect(res.status).toBe(400);
+  });
 });

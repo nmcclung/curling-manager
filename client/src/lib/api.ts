@@ -195,6 +195,11 @@ export const api = {
     request<GenerateTeamsResult>(`/api/cycles/${cycleId}/teams/generate`, { method: "POST", body: "{}" }),
   updateTeamSlot: (slotId: string, playerId: string | null) =>
     request<TeamSlot>(`/api/team-slots/${slotId}`, { method: "PATCH", body: JSON.stringify({ playerId }) }),
+  swapTeamSlots: (slotId: string, otherSlotId: string) =>
+    request<{ ok: true }>(`/api/team-slots/${slotId}/swap`, {
+      method: "POST",
+      body: JSON.stringify({ otherSlotId }),
+    }),
 
   getSchedule: (cycleId: string) => request<ScheduleWithMatches>(`/api/cycles/${cycleId}/schedule`),
   generateSchedule: (cycleId: string) =>

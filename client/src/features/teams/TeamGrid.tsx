@@ -1,6 +1,15 @@
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectSeparator,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { api, type Player, type Position, type Team } from "@/lib/api";
 
 const POSITION_LABELS: Record<Position, string> = {
@@ -11,6 +20,7 @@ const POSITION_LABELS: Record<Position, string> = {
 };
 
 const SPARE = "__SPARE__";
+const SWAP_PREFIX = "__SWAP__:";
 
 function isEligibleForPosition(player: Player, position: Position): boolean {
   switch (position) {
@@ -47,7 +57,11 @@ export function TeamGrid({
   const updateSlot = async (slotId: string, value: string) => {
     setError(null);
     try {
-      await api.updateTeamSlot(slotId, value === SPARE ? null : value);
+      if (value.startsWith(SWAP_PREFIX)) {
+        await api.swapTeamSlots(slotId, value.slice(SWAP_PREFIX.length));
+      } else {
+        await api.updateTeamSlot(slotId, value === SPARE ? null : value);
+      }
       onChanged();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -82,6 +96,22 @@ export function TeamGrid({
                 const options =
                   slot.player && !eligible.some((p) => p.id === slot.player!.id) ? [...eligible, slot.player] : eligible;
 
+                // Swap candidates: the same position's occupant on every
+                // *other* team. This is the only way to move a Skip between
+                // teams (Skip can never pass through SPARE), and works the
+                // same way for any other position as a one-step alternative
+                // to "mark this one SPARE, then pick them from the other
+                // slot" — trading two same-position occupants directly is
+                // always eligibility-safe, since both already qualified to
+                // be assigned there.
+                const swapCandidates = teams
+                  .filter((t) => t.id !== team.id)
+                  .flatMap((t) =>
+                    t.slots
+                      .filter((s) => s.position === position && s.player)
+                      .map((s) => ({ slotId: s.id, player: s.player!, teamNumber: t.teamNumber })),
+                  );
+
                 return (
                   <div key={slot.id} className="flex items-center justify-between gap-2">
                     <span className="w-14 shrink-0 text-sm text-muted-foreground">
@@ -102,6 +132,21 @@ export function TeamGrid({
                             {p.name}
                           </SelectItem>
                         ))}
+                        {swapCandidates.length > 0 && (
+                          <>
+                            <SelectSeparator />
+                            <SelectGroup>
+                              <SelectLabel>Swap with</SelectLabel>
+                              {swapCandidates
+                                .sort((a, b) => a.teamNumber - b.teamNumber)
+                                .map((c) => (
+                                  <SelectItem key={c.slotId} value={`${SWAP_PREFIX}${c.slotId}`}>
+                                    {c.player.name} (Team {c.teamNumber})
+                                  </SelectItem>
+                                ))}
+                            </SelectGroup>
+                          </>
+                        )}
                       </SelectContent>
                     </Select>
                   </div>

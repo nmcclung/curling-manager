@@ -176,7 +176,17 @@ The app has three routed pages (`react-router-dom`, shell + nav in
   numbers (e.g. "19 eligible players for 16 slots") and concrete next
   steps, not just names — the dropdown filtering above is what actually
   lets someone act on them (e.g. swap a leftover skip-only specialist into
-  an open Skip slot).
+  an open Skip slot). Every slot's dropdown also has a "Swap with" group
+  listing that position's occupant on every other team, which performs an
+  atomic two-slot trade (`POST /api/team-slots/:id/swap`) instead of a
+  plain assignment. This is the only way to move a **Skip** between teams:
+  Skip can't pass through the SPARE-then-reassign flow the other positions
+  use (clear one slot, then pick that player from another slot's dropdown)
+  since Skip can never be left as a SPARE. Restricted to two slots of the
+  *same position*, same cycle, different teams — that restriction is what
+  makes the swap unconditionally safe (both occupants already satisfied
+  whatever eligibility/override got them placed there, so trading them
+  can't introduce new eligibility risk the way a cross-position swap could).
 
   **Single-position-specialist oversupply is a gated, not advisory, check**
   (roster readiness checklist *and* `validateRosterForGeneration` server-

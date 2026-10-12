@@ -149,6 +149,49 @@ teamsRouter.patch("/team-slots/:id", async (req, res) => {
   }
 });
 
+const slotSwapInput = z.object({
+  otherSlotId: z.string().min(1),
+});
+
+// POST /api/team-slots/:id/swap — exchange two slots' occupants directly.
+// This is the only way to move a Skip between teams: Skip can never pass
+// through a SPARE intermediate state (the usual "clear this slot, then pick
+// them from another slot's dropdown" flow), so a plain PATCH can't move one
+// without first emptying the destination, which isn't allowed either.
+// Restricted to two slots of the *same position* (different teams, same
+// cycle) — that's what makes the swap unconditionally safe: both occupants
+// already satisfied whatever eligibility/override let them be assigned to
+// that position, so trading them introduces no new eligibility risk. A
+// cross-position swap would need to re-check eligibility in both
+// directions and isn't needed for the Skip use case this exists for.
+teamsRouter.post("/team-slots/:id/swap", async (req, res) => {
+  try {
+    const { otherSlotId } = slotSwapInput.parse(req.body);
+    if (otherSlotId === req.params.id) throw new HttpError(400, "Cannot swap a slot with itself.");
+
+    const [slotA, slotB] = await Promise.all([
+      prisma.teamSlot.findUnique({ where: { id: req.params.id }, include: { team: true } }),
+      prisma.teamSlot.findUnique({ where: { id: otherSlotId }, include: { team: true } }),
+    ]);
+    if (!slotA || !slotB) throw new HttpError(404, "Slot not found");
+    if (slotA.position !== slotB.position) throw new HttpError(400, "Can only swap two slots in the same position.");
+    if (slotA.team.cycleId !== slotB.team.cycleId) {
+      throw new HttpError(400, "Can only swap slots within the same cycle.");
+    }
+    if (slotA.teamId === slotB.teamId) throw new HttpError(400, "Those slots are already on the same team.");
+
+    await prisma.$transaction([
+      prisma.teamSlot.update({ where: { id: slotA.id }, data: { playerId: slotB.playerId } }),
+      prisma.teamSlot.update({ where: { id: slotB.id }, data: { playerId: slotA.playerId } }),
+      prisma.schedule.updateMany({ where: { cycleId: slotA.team.cycleId }, data: { isStale: true } }),
+    ]);
+
+    res.json({ ok: true });
+  } catch (err) {
+    handleError(err, res);
+  }
+});
+
 // groupIndex is the team-generation time-slot group (teamGeneration/groups.ts)
 // this team belongs to — included here purely for display (e.g. the printable
 // schedule color-codes teams by group, mirroring the old system, since that's
