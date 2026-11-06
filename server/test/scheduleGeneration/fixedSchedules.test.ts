@@ -5,15 +5,18 @@ import { FIXED_SCHEDULES, type TeamCount } from "../../src/scheduleGeneration/fi
 // Guards the HARD constraints documented in CLAUDE.md for this generated
 // (not hand-written) data file: no repeat opponents within a cycle, every
 // team-generation time-slot group stays entirely within one draw each
-// week, and every team plays exactly 2 early / 2 late across the cycle.
-// If someone hand-edits fixedSchedules.ts or re-runs
-// generate-fixed-schedules.ts with a bug, this is what would catch it —
-// the first two properties are what makes TimeSlotPair placement during
-// team generation mean anything real (see groups.ts's comment); the third
-// is what an earlier version of this data file got wrong (a per-week
-// 50/50 coin flip with no memory of prior weeks produced teams stuck at 4
-// early / 0 late for a whole cycle — a real fairness complaint, not a
-// cosmetic one).
+// week, every team plays exactly 2 early / 2 late across the cycle, and
+// every ghost ("open") game is always on the same sheet. If someone
+// hand-edits fixedSchedules.ts or re-runs generate-fixed-schedules.ts with
+// a bug, this is what would catch it — the first two properties are what
+// makes TimeSlotPair placement during team generation mean anything real
+// (see groups.ts's comment); the third is what an earlier version of this
+// data file got wrong (a per-week 50/50 coin flip with no memory of prior
+// weeks produced teams stuck at 4 early / 0 late for a whole cycle — a
+// real fairness complaint, not a cosmetic one); the fourth is what an
+// earlier version got wrong by only avoiding the *middle* sheets for
+// ghosts, which still let the open sheet drift between sheet 1 and sheet 4
+// week to week.
 describe("FIXED_SCHEDULES", () => {
   const teamCounts: TeamCount[] = [12, 14, 16];
 
@@ -88,6 +91,21 @@ describe("FIXED_SCHEDULES", () => {
         for (let t = 1; t <= teamCount; t++) {
           const c = counts.get(t)!;
           expect(c, `team ${t} is not evenly split early/late`).toEqual({ early: 2, late: 2 });
+        }
+      });
+
+      it("always places a ghost game on sheet 4, every week", () => {
+        for (const [weekIndex, week] of weeks.entries()) {
+          for (const [drawName, draw] of [
+            ["early", week.early],
+            ["late", week.late],
+          ] as const) {
+            draw.forEach(([a, b], idx) => {
+              const isGhost = a > teamCount || b > teamCount;
+              if (!isGhost) return;
+              expect(idx + 1, `week ${weekIndex + 1} ${drawName}: ghost game is on sheet ${idx + 1}, not 4`).toBe(4);
+            });
+          }
         }
       });
     });

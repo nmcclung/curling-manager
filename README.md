@@ -52,8 +52,8 @@ negotiable and some best-effort:
 | No team plays the same opponent twice in a cycle | Hard | Always |
 | A timeslot pair's two players always draw at the same time each week | Hard | Always |
 | Every team gets exactly 2 early / 2 late draws per cycle | Hard | Always |
+| The ghost ("open") game is always on the same sheet | Hard | Always sheet 4 |
 | No team plays the same sheet 3+ times in a cycle | Soft | Worst case 2x |
-| Ghost ("open") games avoid the preferred middle sheets | Soft | 100% currently |
 | Real teams rotate through as many distinct sheets as possible | Soft (tiebreak) | Varies by team count |
 
 ## Tech Stack
