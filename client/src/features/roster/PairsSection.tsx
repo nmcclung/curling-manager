@@ -158,8 +158,9 @@ export function PairsSection({
               <span>
                 {pair.playerA.name} &harr; {pair.playerB.name}
                 {hasInactiveMember && (
-                  <span className="ml-2 text-destructive">
-                    ⚠ {!pair.playerA.active && !pair.playerB.active ? "both inactive" : "one player inactive"} — consider removing
+                  <span className="ml-2 text-muted-foreground">
+                    ⚠ {!pair.playerA.active && !pair.playerB.active ? "both inactive" : "one player inactive"} —
+                    paused until both are active again
                   </span>
                 )}
               </span>

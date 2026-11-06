@@ -282,30 +282,18 @@ function LeagueRoster({
   };
 
   // Deactivating a player who's in a timeslot pair leaves that pair with an
-  // inactive member — offer to remove the pair(s) too rather than leaving
-  // them stale (matches the same pair-impact pattern used for delete below).
-  // The pair removal itself still happens immediately (it's a separate
-  // entity with its own immediate CRUD elsewhere on this page); only the
-  // player's own `active` flag gets staged like every other field here.
-  const setActive = async (player: Player, active: boolean) => {
+  // inactive member — deliberately left in place rather than deleted (used
+  // to prompt to remove it, which was a real annoyance: a pair re-added
+  // every time its players cycle between active/inactive, e.g. seasonal
+  // gaps, instead of just resuming on its own). Team generation already
+  // ignores any pair with an inactive member (routes/teams.ts filters pairs
+  // to active-active before drafting), so a pair naturally "pauses" while
+  // either player is inactive and resumes automatically once both are
+  // active again — no re-creation needed. Deleting a player outright (not
+  // deactivating) still removes their pair(s), since that player row won't
+  // exist anymore for the pair to reference.
+  const setActive = (player: Player, active: boolean) => {
     setError(null);
-    if (!active) {
-      try {
-        const pairs = await api.getPairs(seasonId, league.id);
-        const involved = pairs.filter((p) => p.playerAId === player.id || p.playerBId === player.id);
-        if (involved.length > 0) {
-          const partnerNames = involved.map((p) => (p.playerAId === player.id ? p.playerB : p.playerA).name).join(", ");
-          const proceed = window.confirm(
-            `${player.name} is paired with ${partnerNames}. Deactivating them will also remove ${involved.length === 1 ? "this pair" : "these pairs"}. Continue?`,
-          );
-          if (!proceed) return;
-          await Promise.all(involved.map((p) => api.deletePair(p.id)));
-        }
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
-        return;
-      }
-    }
     stageField(player, { active });
   };
 

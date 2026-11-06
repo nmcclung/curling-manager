@@ -96,12 +96,20 @@ The app has three routed pages (`react-router-dom`, shell + nav in
   count) also breaks out specialist counts per position (eligible for
   *exactly* that one position — the number the oversupply gate actually
   cares about, see below) plus a new-curler count, all active-player-scoped.
-  Deactivating a player who's in a `TimeSlotPair` offers to remove the
-  pair(s) too rather than leaving them stale; existing stale pairs (an
-  inactive member some other way) show a warning inline. Pair creation
-  validates both players are active, client-side (the picker only lists
-  active players) and server-side. The pair-creation player pickers are a
-  searchable combobox (shadcn `command`/`popover`, click to open then type
+  Deactivating a player who's in a `TimeSlotPair` leaves the pair in place
+  rather than deleting it — team generation already filters pairs down to
+  active-active only before drafting (`routes/teams.ts`), so a pair with an
+  inactive member just sits dormant and resumes automatically once both
+  members are active again, no re-creation needed. This used to prompt to
+  delete the pair on deactivation, which was a real annoyance for a pair
+  that cycles between active/inactive across seasons; an inline warning
+  ("paused until both are active again") still shows for visibility, and
+  "Remove" is still there as a manual option for an actually-over pairing.
+  Deleting a player outright (not deactivating) still removes their pair(s)
+  too, since that player row won't exist anymore to reference. Pair
+  creation validates both players are active, client-side (the picker only
+  lists active players) and server-side. The pair-creation player pickers
+  are a searchable combobox (shadcn `command`/`popover`, click to open then type
   to filter by name) rather than a plain dropdown — confirmed necessary at
   real-roster scale (66 active players was an unusable scroll in a plain
   `<Select>`, which has no typeahead search).
